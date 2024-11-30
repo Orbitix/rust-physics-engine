@@ -5,8 +5,8 @@ use partial_borrow::prelude::*;
 
 use macroquad::prelude::*;
 
-const BALL_COUNT: usize = 200;
-const BALL_RADIUS: f32 = 10.0;
+const BALL_COUNT: usize = 400;
+const BALL_RADIUS: f32 = 5.0;
 const GRAVITY: f32 = 0.1;
 
 const RESISTANCE: f32 = 0.999;
@@ -122,14 +122,14 @@ async fn resolve_collision(ball: &mut Ball, otherball: &mut Ball) {
     otherball.velocity -= dot_product * pdiff * restitution;
 }
 
-#[macroquad::main("MyGame")]
+#[macroquad::main("Physics Sim")]
 async fn main() {
     request_new_screen_size(WIDTH, HEIGHT);
     let mut balls: Vec<Ball> = (0..BALL_COUNT)
         .map(|_| Ball {
             position: vec2(
-                rand::gen_range(BALL_RADIUS, WIDTH - BALL_RADIUS),
-                rand::gen_range(BALL_RADIUS, HEIGHT - BALL_RADIUS),
+                rand::gen_range(BALL_RADIUS, screen_width() - BALL_RADIUS),
+                rand::gen_range(BALL_RADIUS, screen_height() - BALL_RADIUS),
             ),
             velocity: vec2(rand::gen_range(-2.0, 2.0), rand::gen_range(-2.0, 2.0)),
             color: Color::new(
@@ -190,8 +190,8 @@ async fn main() {
                     ball.velocity.x *= -BOUNCE_AMOUNT;
                 }
             }
-            if ball.position.x + ball.radius > WIDTH {
-                ball.position.x = WIDTH - ball.radius;
+            if ball.position.x + ball.radius > screen_width() {
+                ball.position.x = screen_width() - ball.radius;
                 if ball.velocity.x > 0.0 {
                     ball.velocity.x *= -BOUNCE_AMOUNT;
                 }
@@ -203,8 +203,8 @@ async fn main() {
                     ball.velocity.y *= -BOUNCE_AMOUNT;
                 }
             }
-            if ball.position.y + ball.radius > HEIGHT {
-                ball.position.y = HEIGHT - ball.radius;
+            if ball.position.y + ball.radius > screen_height() {
+                ball.position.y = screen_height() - ball.radius;
                 if ball.velocity.y > 0.0 {
                     ball.velocity.y *= -BOUNCE_AMOUNT;
                 }
