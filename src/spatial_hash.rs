@@ -37,13 +37,13 @@ impl<ID: Copy + Eq> SpatialHash<ID> {
     }
 
     /// Removes an object ID from the spatial hash
-    pub fn remove(&mut self, position: Vec2, id: ID) {
-        if let Some(cell) = self.grid.get_mut(&self.to_cell_coords(position)) {
-            if let Some(pos) = cell.iter().position(|&stored_id| stored_id == id) {
-                cell.remove(pos);
-            }
-        }
-    }
+    // pub fn remove(&mut self, position: Vec2, id: ID) {
+    //     if let Some(cell) = self.grid.get_mut(&self.to_cell_coords(position)) {
+    //         if let Some(pos) = cell.iter().position(|&stored_id| stored_id == id) {
+    //             cell.remove(pos);
+    //         }
+    //     }
+    // }
 
     pub fn clear(&mut self) {
         self.grid.clear();
