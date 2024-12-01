@@ -1,19 +1,22 @@
 mod spatial_hash;
+
 use spatial_hash::SpatialHash;
 
 use partial_borrow::prelude::*;
 
 use macroquad::prelude::*;
 
-const BALL_COUNT: usize = 400;
-const BALL_RADIUS: f32 = 5.0;
-const GRAVITY: f32 = 0.1;
+const BALL_COUNT: usize = 1000;
+const BALL_RADIUS: f32 = 10.0;
+const GRAVITY: f32 = 0.4;
+
+const UPDATE_RATE: f32 = 1.0 / 60.0;
 
 const RESISTANCE: f32 = 0.999;
 const BOUNCE_AMOUNT: f32 = 0.6;
 
-const WIDTH: f32 = 1000.0;
-const HEIGHT: f32 = 600.0;
+const WIDTH: f32 = 1200.0;
+const HEIGHT: f32 = 800.0;
 
 #[derive(Debug, Clone, Copy)]
 struct Ball {
@@ -24,18 +27,13 @@ struct Ball {
     radius: f32,
 }
 
-async fn is_colliding(ball: &Ball, otherball: &Ball) -> bool {
+fn is_colliding(ball: &Ball, otherball: &Ball) -> bool {
     let dist = ball.position.distance(otherball.position);
 
-    if dist < ball.radius + otherball.radius {
-        // collision
-        return true;
-    }
-
-    return false;
+    dist < ball.radius + otherball.radius
 }
 
-async fn resolve_collision(ball: &mut Ball, otherball: &Ball) {
+fn resolve_collision(ball: &mut Ball, otherball: &mut Ball) {
     let mut pdiff = otherball.position - ball.position;
 
     let dist = ball.position.distance(otherball.position);
@@ -48,9 +46,9 @@ async fn resolve_collision(ball: &mut Ball, otherball: &Ball) {
         return;
     }
 
-    // ball.position -= pdiff * overlap / 2.0;
-    ball.position -= pdiff * overlap;
-    // otherball.position += pdiff * overlap / 2.0;
+    ball.position -= pdiff * overlap / 2.0;
+    // ball.position -= pdiff * overlap;
+    otherball.position += pdiff * overlap / 2.0;
 
     let vdiff = otherball.velocity - ball.velocity;
 
@@ -60,12 +58,12 @@ async fn resolve_collision(ball: &mut Ball, otherball: &Ball) {
         return;
     }
 
-    let impulse = 2.0 * dot_product / (ball.radius + otherball.radius);
+    // let impulse = 2.0 * dot_product / (ball.radius + otherball.radius);
 
     let restitution = 1.0 - BOUNCE_AMOUNT;
 
-    ball.velocity += impulse * pdiff * restitution;
-    // otherball.velocity -= impulse * pdiff * restitution;
+    ball.velocity += dot_product * pdiff * restitution;
+    otherball.velocity -= dot_product * pdiff * restitution;
 }
 
 #[macroquad::main("Physics Sim")]
@@ -77,8 +75,8 @@ async fn main() {
         .map(|(id, _)| Ball {
             id,
             position: vec2(
-                rand::gen_range(BALL_RADIUS, screen_width() - BALL_RADIUS),
-                rand::gen_range(BALL_RADIUS, screen_height() - BALL_RADIUS),
+                rand::gen_range(BALL_RADIUS, WIDTH - BALL_RADIUS),
+                rand::gen_range(BALL_RADIUS, HEIGHT - BALL_RADIUS),
             ),
             velocity: vec2(rand::gen_range(-2.0, 2.0), rand::gen_range(-2.0, 2.0)),
             color: Color::new(
@@ -96,22 +94,36 @@ async fn main() {
     loop {
         clear_background(BLACK);
 
+        spatial_hash.clear();
+
         for ball in balls.iter() {
             spatial_hash.insert(ball.position, ball.id);
         }
 
-        let ball_copy = balls.clone();
+        for i in 0..balls.len() {
+            for &other_ball_id in spatial_hash.get_nearby_objects(balls[i].position).iter() {
+                if i != other_ball_id {
+                    // Use index to get mutable references
+                    let (ball, other_ball) = if i < other_ball_id {
+                        let (left, right) = balls.split_at_mut(other_ball_id);
+                        (&mut left[i], &mut right[0])
+                    } else {
+                        let (left, right) = balls.split_at_mut(i);
+                        (&mut right[0], &mut left[other_ball_id])
+                    };
 
-        for ball in balls.iter_mut() {
-            let nearby_ball_ids = spatial_hash.get_nearby_objects(ball.position);
-
-            for other_ball_id in nearby_ball_ids.iter() {
-                if let Some(other_ball) = ball_copy.get(*other_ball_id) {
-                    if is_colliding(ball, other_ball).await {
-                        resolve_collision(ball, other_ball).await;
+                    if is_colliding(ball, other_ball) {
+                        resolve_collision(ball, other_ball);
                     }
                 }
             }
+        }
+
+        let delta_time = get_frame_time();
+        let mut rate = UPDATE_RATE - delta_time;
+
+        if rate < 0.0 {
+            rate = 0.01
         }
 
         for ball in balls.iter_mut() {
@@ -120,7 +132,7 @@ async fn main() {
             ball.velocity.x *= RESISTANCE;
             ball.velocity.y *= RESISTANCE;
 
-            ball.position += ball.velocity;
+            ball.position += ball.velocity * rate;
 
             if ball.position.x - ball.radius < 0.0 {
                 ball.position.x = ball.radius;
@@ -151,7 +163,6 @@ async fn main() {
             draw_circle(ball.position.x, ball.position.y, ball.radius, ball.color)
         }
 
-        spatial_hash.clear();
         next_frame().await
     }
 }

@@ -5,6 +5,8 @@ use macroquad::prelude::*;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct CellCoords(i32, i32);
 
+#[derive(Debug)]
+
 pub struct SpatialHash<ID> {
     cell_size: f32,
     grid: HashMap<CellCoords, Vec<ID>>, // Mapping of cell coordinates to object IDs
@@ -61,13 +63,11 @@ impl<ID: Copy + Eq> SpatialHash<ID> {
 
         let mut nearby_objects = Vec::new();
 
-        // Iterate over the 3x3 grid of surrounding cells
         for dx in -1..=1 {
             for dy in -1..=1 {
-                if let Some(objects) = self.get_objects_in_cell(Vec2::new(
-                    (center_cell.0 + dx) as f32,
-                    (center_cell.1 + dy) as f32,
-                )) {
+                let cell_coords = CellCoords(center_cell.0 + dx, center_cell.1 + dy);
+
+                if let Some(objects) = self.grid.get(&cell_coords) {
                     nearby_objects.extend(objects.iter().copied());
                 }
             }
