@@ -1,5 +1,7 @@
-use std::collections::HashMap;
 use std::ptr;
+
+mod spatial_hash;
+use spatial_hash::SpatialHash;
 
 use partial_borrow::prelude::*;
 
@@ -17,67 +19,12 @@ const HEIGHT: f32 = 600.0;
 
 #[derive(Debug, Clone, Copy)]
 struct Ball {
+    id: usize,
     position: Vec2,
     velocity: Vec2,
     color: Color,
     radius: f32,
 }
-
-// pub struct Grid {
-//     pub width: usize,
-//     pub height: usize,
-//     pub cells: Vec<Vec<Ball>>, // 2D grid where each cell holds a vector of balls
-// }
-
-// impl Grid {
-//     pub fn new(width: usize, height: usize) -> Self {
-//         let cells = vec![vec![]; width * height]; // Initialize all cells as empty
-//         Grid {
-//             width,
-//             height,
-//             cells,
-//         }
-//     }
-
-//     pub fn get_cell_index(&self, x: usize, y: usize) -> Option<usize> {
-//         if x < self.width && y < self.height {
-//             Some(y * self.width + x)
-//         } else {
-//             None
-//         }
-//     }
-
-//     pub fn add_ball(&mut self, x: usize, y: usize, ball: Ball) {
-//         if let Some(index) = self.get_cell_index(x, y) {
-//             self.cells[index].push(ball);
-//         }
-//     }
-
-//     pub fn get_neighbors_mut(&mut self, x: usize, y: usize) -> Vec<&mut Vec<Ball>> {
-//         let mut neighbors = Vec::new();
-
-//         let directions = [
-//             (-1, -1),
-//             (0, -1),
-//             (1, -1), // Top row
-//             (-1, 0),
-//             (1, 0), // Left and right
-//             (-1, 1),
-//             (0, 1),
-//             (1, 1), // Bottom row
-//         ];
-
-//         for (dx, dy) in directions.iter() {
-//             if let Some(neighbor_index) =
-//                 self.get_cell_index((x as isize + dx) as usize, (y as isize + dy) as usize)
-//             {
-//                 neighbors.push(&mut self.cells[neighbor_index]);
-//             }
-//         }
-
-//         neighbors
-//     }
-// }
 
 async fn is_colliding(ball: &Ball, otherball: &Ball) -> bool {
     let dist = ball.position.distance(otherball.position);
@@ -126,7 +73,9 @@ async fn resolve_collision(ball: &mut Ball, otherball: &mut Ball) {
 async fn main() {
     request_new_screen_size(WIDTH, HEIGHT);
     let mut balls: Vec<Ball> = (0..BALL_COUNT)
-        .map(|_| Ball {
+        .enumerate()
+        .map(|(id, _)| Ball {
+            id,
             position: vec2(
                 rand::gen_range(BALL_RADIUS, screen_width() - BALL_RADIUS),
                 rand::gen_range(BALL_RADIUS, screen_height() - BALL_RADIUS),
@@ -142,39 +91,44 @@ async fn main() {
         })
         .collect();
 
-    // let mut spatial_hash = SpatialHash::new(50.0);
+    let mut spatial_hash: SpatialHash<usize> = SpatialHash::new((BALL_RADIUS * 2.0) + 2.0);
 
     loop {
         clear_background(BLACK);
 
-        // for ball in balls.iter() {
-        //     spatial_hash.insert(*ball);
-        // }
-
-        for i in 0..balls.len() {
-            for j in (i + 1)..balls.len() {
-                let (left, right) = balls.split_at_mut(j);
-                let ball1 = &mut left[i];
-                let ball2 = &mut right[0];
-
-                if is_colliding(ball1, ball2).await {
-                    resolve_collision(ball1, ball2).await;
-                }
-            }
+        for ball in balls.iter() {
+            spatial_hash.insert(ball.position, ball.id);
         }
 
-        // for ball in balls.iter_mut() {
-        //     let nearby_balls = spatial_hash.get_nearby(&ball.position, 50.0);
+        // for i in 0..balls.len() {
+        //     for j in (i + 1)..balls.len() {
+        //         let (left, right) = balls.split_at_mut(j);
+        //         let ball1 = &mut left[i];
+        //         let ball2 = &mut right[0];
 
-        //     // Check collisions between the current ball and the nearby ones
-        //     for other_ball in nearby_balls {
-        //         if !std::ptr::eq(ball, other_ball) {
-        //             if is_colliding(ball, other_ball).await {
-        //                 resolve_collision(ball, other_ball).await;
-        //             }
+        //         if is_colliding(ball1, ball2).await {
+        //             resolve_collision(ball1, ball2).await;
         //         }
         //     }
         // }
+
+        let copy_balls = balls.iter_mut();
+
+        for ball in copy_balls {
+            let nearby_ball_ids = spatial_hash.get_nearby_objects(ball.position, 50.0);
+
+            // Check collisions between the current ball and the nearby ones
+            for other_ball_id in nearby_ball_ids {
+                if ball.id != other_ball_id {
+                    let (left, right) = balls.split_at_mut(other_ball_id);
+                    let other_ball = &mut right[0];
+
+                    if is_colliding(ball, other_ball).await {
+                        resolve_collision(ball, other_ball).await;
+                    }
+                }
+            }
+        }
 
         for ball in balls.iter_mut() {
             ball.velocity.y += GRAVITY;
