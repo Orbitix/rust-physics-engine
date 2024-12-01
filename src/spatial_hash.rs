@@ -55,15 +55,15 @@ impl<ID: Copy + Eq> SpatialHash<ID> {
         self.grid.get(&cell_coords)
     }
 
-    /// Returns a list of object IDs within a certain range
-    pub fn get_nearby_objects(&self, position: Vec2, range: f32) -> Vec<ID> {
-        let range_cells = (range / self.cell_size).ceil() as i32;
+    /// Returns a list of object IDs within the surrounding cells
+    pub fn get_nearby_objects(&self, position: Vec2) -> Vec<ID> {
         let center_cell = self.to_cell_coords(position);
 
         let mut nearby_objects = Vec::new();
 
-        for dx in -range_cells..=range_cells {
-            for dy in -range_cells..=range_cells {
+        // Iterate over the 3x3 grid of surrounding cells
+        for dx in -1..=1 {
+            for dy in -1..=1 {
                 if let Some(objects) = self.get_objects_in_cell(Vec2::new(
                     (center_cell.0 + dx) as f32,
                     (center_cell.1 + dy) as f32,

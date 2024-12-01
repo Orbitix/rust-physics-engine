@@ -1,4 +1,3 @@
-
 mod spatial_hash;
 use spatial_hash::SpatialHash;
 
@@ -104,7 +103,7 @@ async fn main() {
         let ball_copy = balls.clone();
 
         for ball in balls.iter_mut() {
-            let nearby_ball_ids = spatial_hash.get_nearby_objects(ball.position, 50.0);
+            let nearby_ball_ids = spatial_hash.get_nearby_objects(ball.position);
 
             for other_ball_id in nearby_ball_ids.iter() {
                 if let Some(other_ball) = ball_copy.get(*other_ball_id) {
