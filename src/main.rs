@@ -6,7 +6,7 @@ use partial_borrow::prelude::*;
 
 use macroquad::prelude::*;
 
-const BALL_COUNT: usize = 500;
+const BALL_COUNT: usize = 200;
 const BALL_RADIUS: f32 = 10.0;
 const GRAVITY: f32 = 9.81;
 
@@ -14,6 +14,7 @@ const UPDATE_RATE: f32 = 1.0 / 60.0;
 
 const RESISTANCE: f32 = 0.999;
 const BOUNCE_AMOUNT: f32 = 0.6;
+// const MAX_SPEED: f32 = 800.0;
 
 const WIDTH: f32 = 1200.0;
 const HEIGHT: f32 = 800.0;
@@ -23,8 +24,67 @@ struct Ball {
     id: usize,
     position: Vec2,
     velocity: Vec2,
+    pressure: f32,
     color: Color,
     radius: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DisplayMode {
+    Normal,
+    Velocity,
+    Pressure,
+}
+
+struct State {
+    display_mode: DisplayMode,
+}
+
+impl State {
+    fn new() -> Self {
+        State {
+            display_mode: DisplayMode::Normal,
+        }
+    }
+
+    fn toggle_display_mode(&mut self) {
+        self.display_mode = match self.display_mode {
+            DisplayMode::Normal => DisplayMode::Velocity,
+            DisplayMode::Velocity => DisplayMode::Pressure,
+            DisplayMode::Pressure => DisplayMode::Normal,
+        };
+    }
+}
+
+fn get_color_from_vel(ball: Ball, max_speed: f32) -> Color {
+    let vel = ball.velocity;
+    let speed = vel.length();
+
+    let normalised_speed = speed / max_speed;
+
+    Color {
+        r: (0.0),
+        g: (normalised_speed),
+        b: (1.0 - normalised_speed),
+        a: (1.0),
+    }
+}
+
+fn get_color_from_pressure(ball: Ball, max_pressure: f32) -> Color {
+    let pressure = ball.pressure;
+
+    let mut normalised_pressure = 0.0;
+
+    if max_pressure != 0.0 {
+        normalised_pressure = pressure / max_pressure;
+    }
+
+    Color {
+        r: (normalised_pressure),
+        g: (0.0),
+        b: (1.0 - normalised_pressure),
+        a: (1.0),
+    }
 }
 
 fn is_colliding(ball: &Ball, otherball: &Ball) -> bool {
@@ -57,17 +117,34 @@ fn resolve_collision(ball: &mut Ball, otherball: &mut Ball) {
         return;
     }
 
-    // let impulse = 2.0 * dot_product / (ball.radius + otherball.radius);
-
     let restitution = 1.0 - BOUNCE_AMOUNT;
 
-    ball.velocity += dot_product * pdiff * restitution;
-    otherball.velocity -= dot_product * pdiff * restitution;
+    let force = dot_product * restitution;
+
+    let area = std::f32::consts::PI * ball.radius * ball.radius;
+    let other_area = std::f32::consts::PI * otherball.radius * otherball.radius;
+
+    ball.pressure = -force / area;
+    otherball.pressure = -force / other_area;
+
+    ball.velocity += force * pdiff;
+    otherball.velocity -= force * pdiff;
 }
 
 #[macroquad::main("Physics Sim")]
 async fn main() {
     request_new_screen_size(WIDTH, HEIGHT);
+
+    let colors: Vec<Color> = (0..BALL_COUNT)
+        .map(|_| {
+            Color::new(
+                rand::gen_range(0.0, 1.0),
+                rand::gen_range(0.0, 1.0),
+                rand::gen_range(0.0, 1.0),
+                1.0,
+            )
+        })
+        .collect();
 
     let mut balls: Vec<Ball> = (0..BALL_COUNT)
         .enumerate()
@@ -81,12 +158,8 @@ async fn main() {
                 rand::gen_range(-100.0, 100.0),
                 rand::gen_range(-100.0, 100.0),
             ),
-            color: Color::new(
-                rand::gen_range(0.0, 1.0),
-                rand::gen_range(0.0, 1.0),
-                rand::gen_range(0.0, 1.0),
-                1.0,
-            ),
+            pressure: 0.0,
+            color: colors[id],
             radius: BALL_RADIUS,
         })
         .collect();
@@ -95,13 +168,25 @@ async fn main() {
 
     let mut do_gravity = true;
 
+    let mut display_state = State::new();
+
     loop {
         clear_background(BLACK);
+
+        let mut max_speed: f32 = 0.0;
+        let mut max_pressure: f32 = 0.0;
 
         spatial_hash.clear();
 
         for ball in balls.iter() {
             spatial_hash.insert(ball.position, ball.id);
+            if ball.velocity.length() > max_speed {
+                max_speed = ball.velocity.length();
+            }
+
+            if ball.pressure > max_pressure {
+                max_pressure = ball.pressure;
+            }
         }
 
         for i in 0..balls.len() {
@@ -118,6 +203,9 @@ async fn main() {
 
                     if is_colliding(ball, other_ball) {
                         resolve_collision(ball, other_ball);
+                    } else {
+                        ball.pressure = 0.0;
+                        other_ball.pressure = 0.0;
                     }
                 }
             }
@@ -138,6 +226,10 @@ async fn main() {
             do_gravity = !do_gravity
         }
 
+        if is_key_pressed(KeyCode::D) {
+            display_state.toggle_display_mode();
+        }
+
         for ball in balls.iter_mut() {
             if mouse_pressed {
                 let mut force = mouse_position - ball.position;
@@ -153,6 +245,16 @@ async fn main() {
 
             if do_gravity {
                 ball.velocity.y += GRAVITY;
+            }
+
+            match display_state.display_mode {
+                DisplayMode::Normal => ball.color = colors[ball.id],
+                DisplayMode::Velocity => {
+                    ball.color = get_color_from_vel(*ball, max_speed);
+                }
+                DisplayMode::Pressure => {
+                    ball.color = get_color_from_pressure(*ball, max_pressure);
+                }
             }
 
             ball.velocity.x *= RESISTANCE;
