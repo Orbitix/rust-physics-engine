@@ -6,9 +6,9 @@ use partial_borrow::prelude::*;
 
 use macroquad::prelude::*;
 
-const BALL_COUNT: usize = 1000;
+const BALL_COUNT: usize = 500;
 const BALL_RADIUS: f32 = 10.0;
-const GRAVITY: f32 = 0.4;
+const GRAVITY: f32 = 9.81;
 
 const UPDATE_RATE: f32 = 1.0 / 60.0;
 
@@ -47,7 +47,6 @@ fn resolve_collision(ball: &mut Ball, otherball: &mut Ball) {
     }
 
     ball.position -= pdiff * overlap / 2.0;
-    // ball.position -= pdiff * overlap;
     otherball.position += pdiff * overlap / 2.0;
 
     let vdiff = otherball.velocity - ball.velocity;
@@ -78,7 +77,10 @@ async fn main() {
                 rand::gen_range(BALL_RADIUS, WIDTH - BALL_RADIUS),
                 rand::gen_range(BALL_RADIUS, HEIGHT - BALL_RADIUS),
             ),
-            velocity: vec2(rand::gen_range(-2.0, 2.0), rand::gen_range(-2.0, 2.0)),
+            velocity: vec2(
+                rand::gen_range(-100.0, 100.0),
+                rand::gen_range(-100.0, 100.0),
+            ),
             color: Color::new(
                 rand::gen_range(0.0, 1.0),
                 rand::gen_range(0.0, 1.0),
@@ -90,6 +92,8 @@ async fn main() {
         .collect();
 
     let mut spatial_hash: SpatialHash<usize> = SpatialHash::new((BALL_RADIUS * 2.0) + 2.0);
+
+    let mut do_gravity = true;
 
     loop {
         clear_background(BLACK);
@@ -120,14 +124,36 @@ async fn main() {
         }
 
         let delta_time = get_frame_time();
-        let mut rate = UPDATE_RATE - delta_time;
+        let mut rate = delta_time;
 
         if rate < 0.0 {
             rate = 0.01
         }
 
+        let mouse_position: Vec2 = mouse_position().into();
+
+        let mouse_pressed = is_mouse_button_down(MouseButton::Left);
+
+        if is_key_pressed(KeyCode::Space) {
+            do_gravity = !do_gravity
+        }
+
         for ball in balls.iter_mut() {
-            ball.velocity.y += GRAVITY;
+            if mouse_pressed {
+                let mut force = mouse_position - ball.position;
+
+                let distance = force.length();
+                if distance < 0.1 {
+                    force /= distance;
+                }
+
+                let attraction_strength = 0.5 * GRAVITY;
+                ball.velocity += force * attraction_strength * rate;
+            }
+
+            if do_gravity {
+                ball.velocity.y += GRAVITY;
+            }
 
             ball.velocity.x *= RESISTANCE;
             ball.velocity.y *= RESISTANCE;
