@@ -64,8 +64,10 @@ impl<ID: Copy + Eq> SpatialHash<ID> {
 
         for dx in -range_cells..=range_cells {
             for dy in -range_cells..=range_cells {
-                let neighbor_cell = CellCoords(center_cell.0 + dx, center_cell.1 + dy);
-                if let Some(objects) = self.grid.get(&neighbor_cell) {
+                if let Some(objects) = self.get_objects_in_cell(Vec2::new(
+                    (center_cell.0 + dx) as f32,
+                    (center_cell.1 + dy) as f32,
+                )) {
                     nearby_objects.extend(objects.iter().copied());
                 }
             }
