@@ -45,6 +45,10 @@ impl<ID: Copy + Eq> SpatialHash<ID> {
         }
     }
 
+    pub fn clear(&mut self) {
+        self.grid.clear();
+    }
+
     /// Returns a list of object IDs in the specified cell
     pub fn get_objects_in_cell(&self, position: Vec2) -> Option<&Vec<ID>> {
         let cell_coords = self.to_cell_coords(position);

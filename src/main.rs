@@ -1,4 +1,4 @@
-use std::ptr;
+use std::{collections::HashMap, ptr};
 
 mod spatial_hash;
 use spatial_hash::SpatialHash;
@@ -37,7 +37,7 @@ async fn is_colliding(ball: &Ball, otherball: &Ball) -> bool {
     return false;
 }
 
-async fn resolve_collision(ball: &mut Ball, otherball: &mut Ball) {
+async fn resolve_collision(ball: &mut Ball, otherball: &Ball) {
     let mut pdiff = otherball.position - ball.position;
 
     let dist = ball.position.distance(otherball.position);
@@ -50,8 +50,9 @@ async fn resolve_collision(ball: &mut Ball, otherball: &mut Ball) {
         return;
     }
 
-    ball.position -= pdiff * overlap / 2.0;
-    otherball.position += pdiff * overlap / 2.0;
+    // ball.position -= pdiff * overlap / 2.0;
+    ball.position -= pdiff * overlap;
+    // otherball.position += pdiff * overlap / 2.0;
 
     let vdiff = otherball.velocity - ball.velocity;
 
@@ -66,12 +67,13 @@ async fn resolve_collision(ball: &mut Ball, otherball: &mut Ball) {
     let restitution = 1.0 - BOUNCE_AMOUNT;
 
     ball.velocity += impulse * pdiff * restitution;
-    otherball.velocity -= impulse * pdiff * restitution;
+    // otherball.velocity -= impulse * pdiff * restitution;
 }
 
 #[macroquad::main("Physics Sim")]
 async fn main() {
     request_new_screen_size(WIDTH, HEIGHT);
+
     let mut balls: Vec<Ball> = (0..BALL_COUNT)
         .enumerate()
         .map(|(id, _)| Ball {
@@ -100,29 +102,13 @@ async fn main() {
             spatial_hash.insert(ball.position, ball.id);
         }
 
-        // for i in 0..balls.len() {
-        //     for j in (i + 1)..balls.len() {
-        //         let (left, right) = balls.split_at_mut(j);
-        //         let ball1 = &mut left[i];
-        //         let ball2 = &mut right[0];
+        let ball_copy = balls.clone();
 
-        //         if is_colliding(ball1, ball2).await {
-        //             resolve_collision(ball1, ball2).await;
-        //         }
-        //     }
-        // }
-
-        let copy_balls = balls.iter_mut();
-
-        for ball in copy_balls {
+        for ball in balls.iter_mut() {
             let nearby_ball_ids = spatial_hash.get_nearby_objects(ball.position, 50.0);
 
-            // Check collisions between the current ball and the nearby ones
-            for other_ball_id in nearby_ball_ids {
-                if ball.id != other_ball_id {
-                    let (left, right) = balls.split_at_mut(other_ball_id);
-                    let other_ball = &mut right[0];
-
+            for other_ball_id in nearby_ball_ids.iter() {
+                if let Some(other_ball) = ball_copy.get(*other_ball_id) {
                     if is_colliding(ball, other_ball).await {
                         resolve_collision(ball, other_ball).await;
                     }
@@ -167,6 +153,7 @@ async fn main() {
             draw_circle(ball.position.x, ball.position.y, ball.radius, ball.color)
         }
 
+        spatial_hash.clear();
         next_frame().await
     }
 }
