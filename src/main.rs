@@ -118,8 +118,8 @@ async fn resolve_collision(ball: &mut Ball, otherball: &mut Ball) {
 
     let restitution = 1.0 - BOUNCE_AMOUNT;
 
-    ball.velocity += dot_product * pdiff * restitution;
-    otherball.velocity -= dot_product * pdiff * restitution;
+    ball.velocity += impulse * pdiff * restitution;
+    otherball.velocity -= impulse * pdiff * restitution;
 }
 
 #[macroquad::main("Physics Sim")]
