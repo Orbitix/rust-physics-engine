@@ -52,10 +52,10 @@ impl<ID: Copy + Eq> SpatialHash<ID> {
     }
 
     /// Returns a list of object IDs in the specified cell
-    pub fn get_objects_in_cell(&self, position: Vec2) -> Option<&Vec<ID>> {
-        let cell_coords = self.to_cell_coords(position);
-        self.grid.get(&cell_coords)
-    }
+    // pub fn get_objects_in_cell(&self, position: Vec2) -> Option<&Vec<ID>> {
+    //     let cell_coords = self.to_cell_coords(position);
+    //     self.grid.get(&cell_coords)
+    // }
 
     /// Returns a list of object IDs within the surrounding cells
     pub fn get_nearby_objects(&self, position: Vec2) -> Vec<ID> {
