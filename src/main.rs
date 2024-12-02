@@ -168,7 +168,7 @@ fn resolve_boundaries(ball: &mut Ball, screen_width: f32, screen_height: f32) {
 async fn main() {
     request_new_screen_size(WIDTH, HEIGHT);
 
-    let colors: Vec<Color> = (0..BALL_COUNT)
+    let mut colors: Vec<Color> = (0..BALL_COUNT)
         .map(|_| {
             Color::new(
                 rand::gen_range(0.0, 1.0),
@@ -197,6 +197,8 @@ async fn main() {
         })
         .collect();
 
+    let mut current_ball_idx = balls.len() - 1;
+
     let mut spatial_hash: SpatialHash<usize> = SpatialHash::new((BALL_RADIUS * 2.0) + 2.0);
 
     let mut do_gravity = true;
@@ -211,10 +213,38 @@ async fn main() {
         let mut max_speed: f32 = 0.0;
         let mut max_pressure: f32 = 0.0;
 
+        let mouse_position: Vec2 = mouse_position().into();
+
         let screen_width = screen_width();
         let screen_height = screen_height();
 
         spatial_hash.clear();
+
+        if is_mouse_button_down(MouseButton::Right) {
+            let color = Color::new(
+                rand::gen_range(0.0, 1.0),
+                rand::gen_range(0.0, 1.0),
+                rand::gen_range(0.0, 1.0),
+                1.0,
+            );
+
+            let new_ball: Ball = Ball {
+                id: current_ball_idx,
+                position: mouse_position,
+                velocity: vec2(
+                    rand::gen_range(-100.0, 100.0),
+                    rand::gen_range(-100.0, 100.0),
+                ),
+                color: color,
+                pressure: 0.0,
+                radius: BALL_RADIUS,
+            };
+
+            balls.push(new_ball);
+            colors.push(color);
+
+            current_ball_idx += 1;
+        }
 
         for ball in balls.iter() {
             spatial_hash.insert(ball.position, ball.id);
@@ -263,8 +293,6 @@ async fn main() {
         if rate < 0.0 {
             rate = 0.01
         }
-
-        let mouse_position: Vec2 = mouse_position().into();
 
         let mouse_pressed = is_mouse_button_down(MouseButton::Left);
 
@@ -335,6 +363,8 @@ async fn main() {
             30.0,
             WHITE,
         );
+
+        draw_text(&format!("BALLS: {}", balls.len()), 10.0, 80.0, 30.0, WHITE);
 
         next_frame().await
     }
