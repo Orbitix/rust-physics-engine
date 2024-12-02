@@ -6,11 +6,13 @@ use partial_borrow::prelude::*;
 
 use macroquad::prelude::*;
 
-const BALL_COUNT: usize = 200;
+const BALL_COUNT: usize = 1000;
 const BALL_RADIUS: f32 = 10.0;
 const GRAVITY: f32 = 9.81;
 
-const UPDATE_RATE: f32 = 1.0 / 60.0;
+// const UPDATE_RATE: f32 = 1.0 / 60.0;
+
+const SIM_STEPS: i32 = 20;
 
 const RESISTANCE: f32 = 0.999;
 const BOUNCE_AMOUNT: f32 = 0.6;
@@ -136,6 +138,32 @@ fn resolve_collision(ball: &mut Ball, otherball: &mut Ball) {
     otherball.velocity -= force * pdiff;
 }
 
+fn resolve_boundaries(ball: &mut Ball, screen_width: f32, screen_height: f32) {
+    if ball.position.x - ball.radius < 0.0 {
+        ball.position.x = ball.radius;
+        if ball.velocity.x < 0.0 {
+            ball.velocity.x *= -BOUNCE_AMOUNT;
+        }
+    } else if ball.position.x + ball.radius > screen_width {
+        ball.position.x = screen_width - ball.radius;
+        if ball.velocity.x > 0.0 {
+            ball.velocity.x *= -BOUNCE_AMOUNT;
+        }
+    }
+
+    if ball.position.y - ball.radius < 0.0 {
+        ball.position.y = ball.radius;
+        if ball.velocity.y < 0.0 {
+            ball.velocity.y *= -BOUNCE_AMOUNT;
+        }
+    } else if ball.position.y + ball.radius > screen_height {
+        ball.position.y = screen_height - ball.radius;
+        if ball.velocity.y > 0.0 {
+            ball.velocity.y *= -BOUNCE_AMOUNT;
+        }
+    }
+}
+
 #[macroquad::main("Physics Sim")]
 async fn main() {
     request_new_screen_size(WIDTH, HEIGHT);
@@ -175,11 +203,16 @@ async fn main() {
 
     let mut display_state = State::new();
 
+    let mut sim_steps = SIM_STEPS;
+
     loop {
         clear_background(BLACK);
 
         let mut max_speed: f32 = 0.0;
         let mut max_pressure: f32 = 0.0;
+
+        let screen_width = screen_width();
+        let screen_height = screen_height();
 
         spatial_hash.clear();
 
@@ -199,25 +232,28 @@ async fn main() {
             }
         }
 
-        for i in 0..balls.len() {
-            for &other_ball_id in spatial_hash.get_nearby_objects(balls[i].position).iter() {
-                if i != other_ball_id {
-                    // Use index to get mutable references
-                    let (ball, other_ball) = if i < other_ball_id {
-                        let (left, right) = balls.split_at_mut(other_ball_id);
-                        (&mut left[i], &mut right[0])
-                    } else {
-                        let (left, right) = balls.split_at_mut(i);
-                        (&mut right[0], &mut left[other_ball_id])
-                    };
+        for _ in 0..sim_steps {
+            for i in 0..balls.len() {
+                for &other_ball_id in spatial_hash.get_nearby_objects(balls[i].position).iter() {
+                    if i != other_ball_id {
+                        // Use index to get mutable references
+                        let (ball, other_ball) = if i < other_ball_id {
+                            let (left, right) = balls.split_at_mut(other_ball_id);
+                            (&mut left[i], &mut right[0])
+                        } else {
+                            let (left, right) = balls.split_at_mut(i);
+                            (&mut right[0], &mut left[other_ball_id])
+                        };
 
-                    if is_colliding(ball, other_ball) {
-                        resolve_collision(ball, other_ball);
-                    } else {
-                        ball.pressure = 0.0;
-                        other_ball.pressure = 0.0;
+                        if is_colliding(ball, other_ball) {
+                            resolve_collision(ball, other_ball);
+                        } else {
+                            ball.pressure = 0.0;
+                            other_ball.pressure = 0.0;
+                        }
                     }
                 }
+                resolve_boundaries(&mut balls[i], screen_width, screen_height);
             }
         }
 
@@ -274,34 +310,31 @@ async fn main() {
 
             ball.position += ball.velocity * rate;
 
-            if ball.position.x - ball.radius < 0.0 {
-                ball.position.x = ball.radius;
-                if ball.velocity.x < 0.0 {
-                    ball.velocity.x *= -BOUNCE_AMOUNT;
-                }
-            }
-            if ball.position.x + ball.radius > screen_width() {
-                ball.position.x = screen_width() - ball.radius;
-                if ball.velocity.x > 0.0 {
-                    ball.velocity.x *= -BOUNCE_AMOUNT;
-                }
-            }
-
-            if ball.position.y - ball.radius < 0.0 {
-                ball.position.y = ball.radius;
-                if ball.velocity.y < 0.0 {
-                    ball.velocity.y *= -BOUNCE_AMOUNT;
-                }
-            }
-            if ball.position.y + ball.radius > screen_height() {
-                ball.position.y = screen_height() - ball.radius;
-                if ball.velocity.y > 0.0 {
-                    ball.velocity.y *= -BOUNCE_AMOUNT;
-                }
-            }
-
             draw_circle(ball.position.x, ball.position.y, ball.radius, ball.color)
         }
+
+        let fps = get_fps();
+        draw_text(&format!("FPS: {}", fps), 10.0, 20.0, 30.0, WHITE);
+
+        let target_sim_steps = if fps < 65 {
+            sim_steps - 1
+        } else if fps > 80 {
+            sim_steps + 1
+        } else {
+            sim_steps
+        };
+
+        // sim_steps = (sim_steps as f32 + 0.1 * (target_sim_steps as f32 - sim_steps as f32)) as i32;
+
+        sim_steps = target_sim_steps.clamp(1, 200);
+
+        draw_text(
+            &format!("SIM STEPS: {}", sim_steps),
+            10.0,
+            50.0,
+            30.0,
+            WHITE,
+        );
 
         next_frame().await
     }

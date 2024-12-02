@@ -6,3 +6,7 @@ edition = "2021"
 [dependencies]
 macroquad = "0.4.13"
 partial-borrow = "1.0.1"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
