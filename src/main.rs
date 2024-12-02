@@ -249,7 +249,7 @@ async fn main() {
                     force /= distance;
                 }
 
-                let attraction_strength = 0.5 * GRAVITY;
+                let attraction_strength = GRAVITY;
                 ball.velocity += force * attraction_strength * rate;
             }
 
