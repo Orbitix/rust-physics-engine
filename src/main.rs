@@ -14,7 +14,9 @@ const UPDATE_RATE: f32 = 1.0 / 60.0;
 
 const RESISTANCE: f32 = 0.999;
 const BOUNCE_AMOUNT: f32 = 0.6;
-// const MAX_SPEED: f32 = 800.0;
+
+const MAX_SPEED: f32 = 2000.0;
+const MAX_PRESSURE: f32 = 1000.0;
 
 const WIDTH: f32 = 1200.0;
 const HEIGHT: f32 = 800.0;
@@ -98,13 +100,13 @@ fn resolve_collision(ball: &mut Ball, otherball: &mut Ball) {
 
     let dist = ball.position.distance(otherball.position);
 
-    pdiff /= dist;
-
     let overlap = (ball.radius + otherball.radius) - dist;
 
     if overlap < 0.001 {
         return;
     }
+
+    pdiff /= dist;
 
     ball.position -= pdiff * overlap / 2.0;
     otherball.position += pdiff * overlap / 2.0;
@@ -126,6 +128,9 @@ fn resolve_collision(ball: &mut Ball, otherball: &mut Ball) {
 
     ball.pressure = -force / area;
     otherball.pressure = -force / other_area;
+
+    ball.pressure = ball.pressure.min(MAX_PRESSURE);
+    otherball.pressure = otherball.pressure.min(MAX_PRESSURE);
 
     ball.velocity += force * pdiff;
     otherball.velocity -= force * pdiff;
@@ -180,12 +185,17 @@ async fn main() {
 
         for ball in balls.iter() {
             spatial_hash.insert(ball.position, ball.id);
-            if ball.velocity.length() > max_speed {
-                max_speed = ball.velocity.length();
+
+            if display_state.display_mode == DisplayMode::Velocity {
+                if ball.velocity.length() > max_speed {
+                    max_speed = ball.velocity.length();
+                }
             }
 
-            if ball.pressure > max_pressure {
-                max_pressure = ball.pressure;
+            if display_state.display_mode == DisplayMode::Pressure {
+                if ball.pressure > max_pressure {
+                    max_pressure = ball.pressure;
+                }
             }
         }
 
@@ -259,6 +269,8 @@ async fn main() {
 
             ball.velocity.x *= RESISTANCE;
             ball.velocity.y *= RESISTANCE;
+
+            ball.velocity = ball.velocity.clamp_length_max(MAX_SPEED);
 
             ball.position += ball.velocity * rate;
 
