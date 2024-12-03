@@ -1,7 +1,9 @@
 mod config;
+mod fps_counter;
 mod spatial_hash;
 
 use config::load_config;
+use fps_counter::SmoothedFps;
 use spatial_hash::SpatialHash;
 
 use partial_borrow::prelude::*;
@@ -167,6 +169,8 @@ async fn main() {
     let target_fps = config.target_fps;
 
     request_new_screen_size(width, height);
+
+    let mut smoothed_fps = SmoothedFps::new();
 
     let mut colors: Vec<Color> = (0..ball_count)
         .map(|_| {
@@ -340,7 +344,11 @@ async fn main() {
         }
 
         let fps = get_fps();
-        draw_text(&format!("FPS: {}", fps), 10.0, 20.0, 30.0, WHITE);
+        smoothed_fps.update(fps as f32);
+
+        let avg_fps = smoothed_fps.get_average();
+
+        draw_text(&format!("FPS: {:.2}", avg_fps), 10.0, 20.0, 30.0, WHITE);
 
         if auto_sim_steps {
             if fps < target_fps {
