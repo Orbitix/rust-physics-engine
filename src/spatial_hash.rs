@@ -7,12 +7,12 @@ struct CellCoords(i32, i32);
 
 #[derive(Debug)]
 
-pub struct SpatialHash {
+pub struct SpatialHash<ID> {
     cell_size: f32,
-    grid: HashMap<CellCoords, Vec<i32>>, // Mapping of cell coordinates to object IDs
+    grid: HashMap<CellCoords, Vec<ID>>, // Mapping of cell coordinates to object IDs
 }
 
-impl SpatialHash {
+impl<ID: Copy + Eq> SpatialHash<ID> {
     /// Creates a new SpatialHash with the given cell size
     pub fn new(cell_size: f32) -> Self {
         Self {
@@ -30,12 +30,12 @@ impl SpatialHash {
     }
 
     /// Inserts an object ID into the spatial hash
-    pub fn insert(&mut self, position: Vec2, id: usize) {
+    pub fn insert(&mut self, position: Vec2, id: ID) {
         let cell_coords = self.to_cell_coords(position);
         self.grid
             .entry(cell_coords)
             .or_insert_with(Vec::new)
-            .push(id as i32);
+            .push(id);
     }
 
     /// Removes an object ID from the spatial hash
@@ -58,7 +58,7 @@ impl SpatialHash {
     // }
 
     /// Returns a list of object IDs within the surrounding cells
-    pub fn get_nearby_objects(&self, position: Vec2, id: i32) -> Vec<i32> {
+    pub fn get_nearby_objects(&self, position: Vec2, id: ID) -> Vec<ID> {
         let center_cell = self.to_cell_coords(position);
 
         let mut nearby_objects = Vec::new();

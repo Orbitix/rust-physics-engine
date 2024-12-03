@@ -201,7 +201,7 @@ async fn main() {
         })
         .collect();
 
-    let mut spatial_hash: SpatialHash = SpatialHash::new((ball_radius * 2.0) + 2.0);
+    let mut spatial_hash: SpatialHash<usize> = SpatialHash::new((ball_radius * 2.0) + 2.0);
 
     let mut do_gravity = true;
 
@@ -209,9 +209,6 @@ async fn main() {
 
     loop {
         clear_background(BLACK);
-
-        let current_ball_idx = balls.len() - 1;
-        println!("idx: {} len: {}", current_ball_idx, balls.len());
 
         let mut largest_speed: f32 = 0.0;
         let mut largest_pressure: f32 = 0.0;
@@ -232,7 +229,7 @@ async fn main() {
             );
 
             let new_ball: Ball = Ball {
-                id: current_ball_idx,
+                id: balls.len(),
                 position: mouse_position,
                 velocity: vec2(
                     rand::gen_range(-100.0, 100.0),
@@ -265,28 +262,23 @@ async fn main() {
 
         for _ in 0..sim_steps {
             for i in 0..balls.len() {
-                for &other_ball_id in spatial_hash
-                    .get_nearby_objects(balls[i].position, i as i32)
-                    .iter()
-                {
-                    // Use index to get mutable references
-                    let (ball, other_ball) = if i < other_ball_id as usize {
-                        let (left, right) = balls.split_at_mut(other_ball_id as usize);
-                        (&mut left[i], &mut right[0])
-                    } else {
-                        let (left, right) = balls.split_at_mut(i);
-                        (&mut right[0], &mut left[other_ball_id as usize])
-                    };
+                for &other_ball_id in spatial_hash.get_nearby_objects(balls[i].position, i).iter() {
+                    if i != other_ball_id {
+                        // Use index to get mutable references
+                        let (ball, other_ball) = if i < other_ball_id {
+                            let (left, right) = balls.split_at_mut(other_ball_id);
+                            (&mut left[i], &mut right[0])
+                        } else {
+                            let (left, right) = balls.split_at_mut(i);
+                            (&mut right[0], &mut left[other_ball_id])
+                        };
 
-                    if ball.id == other_ball_id as usize {
-                        println!("{} {}", ball.id, other_ball_id);
-                    }
-
-                    if is_colliding(ball, other_ball) {
-                        resolve_collision(ball, other_ball, bounce_amount, max_pressure);
-                    } else {
-                        ball.pressure = 0.0;
-                        other_ball.pressure = 0.0;
+                        if is_colliding(ball, other_ball) {
+                            resolve_collision(ball, other_ball, bounce_amount, max_pressure);
+                        } else {
+                            ball.pressure = 0.0;
+                            other_ball.pressure = 0.0;
+                        }
                     }
                 }
                 resolve_boundaries(&mut balls[i], screen_width, screen_height, bounce_amount);

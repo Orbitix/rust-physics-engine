@@ -8,5 +8,5 @@ max_pressure = 1000.0
 width = 1200.0
 height = 800.0
 auto_sim_steps = true
-sim_steps = 10
+sim_steps = 1
 target_fps = 60
