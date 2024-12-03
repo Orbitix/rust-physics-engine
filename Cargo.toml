@@ -9,6 +9,6 @@ partial-borrow = "1.0.1"
 serde = { version = "1.0.215", features = ["derive"] }
 toml = "0.8.19"
 
-[profile.release]
-lto = "fat"
-codegen-units = 1
+# [profile.release]
+# lto = "fat"
+# codegen-units = 1
