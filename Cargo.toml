@@ -4,7 +4,7 @@ version = "0.2.0"
 edition = "2021"
 
 [dependencies]
-macroquad = "0.4.13"
+bevy = "0.15.0"
 partial-borrow = "1.0.1"
 serde = { version = "1.0.215", features = ["derive"] }
 toml = "0.8.19"
@@ -12,3 +12,11 @@ toml = "0.8.19"
 # [profile.release]
 # lto = "fat"
 # codegen-units = 1
+
+# Enable a small amount of optimization in the dev profile.
+[profile.dev]
+opt-level = 1
+
+# Enable a large amount of optimization in the dev profile for dependencies.
+[profile.dev.package."*"]
+opt-level = 3

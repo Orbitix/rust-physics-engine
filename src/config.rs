@@ -1,7 +1,8 @@
+use bevy::prelude::Resource;
 use serde::Deserialize;
 use std::fs;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Resource)]
 pub struct Config {
     pub ball_count: usize,
     pub ball_radius: f32,

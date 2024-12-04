@@ -2,15 +2,15 @@ mod config;
 mod fps_counter;
 mod spatial_hash;
 
-use config::load_config;
+use config::{load_config, Config};
 use fps_counter::SmoothedFps;
 use spatial_hash::SpatialHash;
 
 use partial_borrow::prelude::*;
 
-use macroquad::prelude::*;
+use bevy::prelude::*;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Component)]
 struct Ball {
     id: usize,
     position: Vec2,
@@ -27,13 +27,14 @@ enum DisplayMode {
     Pressure,
 }
 
-struct State {
+#[derive(Resource)]
+struct DisplayState {
     display_mode: DisplayMode,
 }
 
-impl State {
+impl DisplayState {
     fn new() -> Self {
-        State {
+        DisplayState {
             display_mode: DisplayMode::Normal,
         }
     }
@@ -45,6 +46,16 @@ impl State {
             DisplayMode::Pressure => DisplayMode::Normal,
         };
     }
+}
+
+fn main() {
+    let config = load_config("config.toml");
+    let display_state = DisplayState::new();
+
+    App::new()
+        .insert_resource(config)
+        .insert_resource(display_state)
+        .add_plugins(DefaultPlugins);
 }
 
 fn get_color_from_vel(ball: Ball, largest_speed: f32) -> Color {
@@ -205,7 +216,7 @@ async fn main() {
 
     let mut do_gravity = true;
 
-    let mut display_state = State::new();
+    let mut display_state = DisplayState::new();
 
     loop {
         clear_background(BLACK);
