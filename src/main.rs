@@ -167,6 +167,7 @@ async fn main() {
     let mut sim_steps = config.sim_steps;
     let auto_sim_steps = config.auto_sim_steps;
     let target_fps = config.target_fps;
+    let fps_boundary = config.fps_boundary;
 
     request_new_screen_size(width, height);
 
@@ -349,7 +350,7 @@ async fn main() {
         if auto_sim_steps {
             if fps < target_fps {
                 sim_steps -= 1;
-            } else if fps > (target_fps + 20) {
+            } else if fps > (target_fps + fps_boundary) {
                 sim_steps += 1;
             }
         } else {
