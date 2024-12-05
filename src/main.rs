@@ -353,6 +353,7 @@ async fn main() {
             to_remove.sort_unstable_by(|a, b| b.cmp(a));
             for idx in to_remove {
                 balls.remove(idx);
+                colors.remove(idx);
             }
 
             for (idx, ball) in balls.iter_mut().enumerate() {
