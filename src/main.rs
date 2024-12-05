@@ -338,6 +338,28 @@ async fn main() {
             draw_circle(ball.position.x, ball.position.y, ball.radius, ball.color)
         }
 
+        if is_key_down(KeyCode::F) {
+            let mut to_remove: Vec<usize> = Vec::new();
+
+            for (index, ball) in balls.iter().enumerate() {
+                let dist = ball.position.distance(mouse_position);
+
+                if dist < 20.0 {
+                    to_remove.push(index);
+                }
+            }
+
+            to_remove.sort_unstable_by(|a, b| b.cmp(a));
+            for idx in to_remove {
+                balls.remove(idx);
+            }
+
+            for (idx, ball) in balls.iter_mut().enumerate() {
+                ball.id = idx;
+                colors[idx] = ball.color;
+            }
+        }
+
         let fps = get_fps();
         smoothed_fps.update(fps as f32);
 
