@@ -16,6 +16,7 @@ pub struct Config {
     pub auto_sim_steps: bool,
     pub target_fps: i32,
     pub fps_boundary: i32,
+    pub delete_dist: f32,
 }
 
 pub fn load_config(path: &str) -> Config {

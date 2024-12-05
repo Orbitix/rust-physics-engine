@@ -166,6 +166,7 @@ async fn main() {
     let auto_sim_steps = config.auto_sim_steps;
     let target_fps = config.target_fps;
     let fps_boundary = config.fps_boundary;
+    let delete_dist = config.delete_dist;
 
     request_new_screen_size(width, height);
 
@@ -344,7 +345,7 @@ async fn main() {
             for (index, ball) in balls.iter().enumerate() {
                 let dist = ball.position.distance(mouse_position);
 
-                if dist < 20.0 {
+                if dist < delete_dist {
                     to_remove.push(index);
                 }
             }
