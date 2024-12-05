@@ -108,9 +108,7 @@ fn resolve_collision(ball: &mut Ball, otherball: &mut Ball, bounce_amount: f32, 
         return;
     }
 
-    let restitution = 1.0 - bounce_amount;
-
-    let force = dot_product * restitution;
+    let force = dot_product * bounce_amount;
 
     let area = std::f32::consts::PI * ball.radius * ball.radius;
     let other_area = std::f32::consts::PI * otherball.radius * otherball.radius;
