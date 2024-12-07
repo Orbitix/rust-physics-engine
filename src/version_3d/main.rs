@@ -396,7 +396,11 @@ async fn main() {
 
         let avg_fps = smoothed_fps.get_average();
 
-        draw_cube_wires(vec3(0., 0., 0.), vec3(width, height, depth), DARKGREEN);
+        draw_cube_wires(
+            vec3(width / 2.0, height / 2.0, depth / 2.0),
+            vec3(width, height, depth),
+            DARKGREEN,
+        );
 
         draw_text(&format!("FPS: {:.2}", avg_fps), 10.0, 20.0, 30.0, WHITE);
 
