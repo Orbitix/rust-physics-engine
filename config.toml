@@ -1,4 +1,5 @@
-ball_count = 1000
+ball_count_2d = 1000
+ball_count_3d = 400
 ball_radius = 10.0
 gravity = 9.81
 resistance = 0.999
@@ -7,6 +8,7 @@ max_speed = 2000.0
 max_pressure = 1000.0
 width = 1200.0
 height = 800.0
+depth = 1000.0
 auto_sim_steps = true
 sim_steps = 1
 target_fps = 60

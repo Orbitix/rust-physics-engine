@@ -1,6 +1,6 @@
 [package]
 name = "rust-physics-engine"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2021"
 
 [dependencies]
@@ -8,6 +8,20 @@ macroquad = "0.4.13"
 partial-borrow = "1.0.1"
 serde = { version = "1.0.215", features = ["derive"] }
 toml = "0.8.19"
+# version_2d = { path = "src/version_2d/main.rs" }
+# version_3d = { path = "src/version_3d/main.rs" }
+
+[[bin]]
+name = "version_2d"
+path = "src/version_2d/main.rs"
+
+[[bin]]
+name = "version_3d"
+path = "src/version_3d/main.rs"
+
+[features]
+version_2d = []
+version_3d = []
 
 [profile.release]
 lto = "fat"

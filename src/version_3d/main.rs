@@ -1,10 +1,9 @@
-mod config;
-mod fps_counter;
-mod spatial_hash;
+use rust_physics_engine::common;
+mod spatial_hash_3d;
 
-use config::load_config;
-use fps_counter::SmoothedFps;
-use spatial_hash::SpatialHash;
+use common::config::load_config;
+use common::fps_counter::SmoothedFps;
+use spatial_hash_3d::SpatialHash;
 
 use partial_borrow::prelude::*;
 
@@ -13,8 +12,8 @@ use macroquad::prelude::*;
 #[derive(Debug, Clone, Copy)]
 struct Ball {
     id: usize,
-    position: Vec2,
-    velocity: Vec2,
+    position: Vec3,
+    velocity: Vec3,
     pressure: f32,
     color: Color,
     radius: f32,
@@ -102,7 +101,7 @@ fn resolve_collision(ball: &mut Ball, otherball: &mut Ball, bounce_amount: f32, 
 
     let vdiff = otherball.velocity - ball.velocity;
 
-    let dot_product = vdiff.x * pdiff.x + vdiff.y * pdiff.y;
+    let dot_product = vdiff.x * pdiff.x + vdiff.y * pdiff.y + vdiff.z * pdiff.z;
 
     if dot_product > 0.0 {
         return;
@@ -123,7 +122,13 @@ fn resolve_collision(ball: &mut Ball, otherball: &mut Ball, bounce_amount: f32, 
     otherball.velocity -= force * pdiff;
 }
 
-fn resolve_boundaries(ball: &mut Ball, screen_width: f32, screen_height: f32, bounce_amount: f32) {
+fn resolve_boundaries(
+    ball: &mut Ball,
+    screen_width: f32,
+    screen_height: f32,
+    screen_depth: f32,
+    bounce_amount: f32,
+) {
     if ball.position.x - ball.radius < 0.0 {
         ball.position.x = ball.radius;
         if ball.velocity.x < 0.0 {
@@ -147,13 +152,26 @@ fn resolve_boundaries(ball: &mut Ball, screen_width: f32, screen_height: f32, bo
             ball.velocity.y *= -bounce_amount;
         }
     }
+
+    if ball.position.z - ball.radius < 0.0 {
+        ball.position.z = ball.radius;
+        if ball.velocity.z < 0.0 {
+            ball.velocity.z *= -bounce_amount;
+        }
+    } else if ball.position.z + ball.radius > screen_depth {
+        ball.position.z = screen_depth - ball.radius;
+        if ball.velocity.z > 0.0 {
+            ball.velocity.z *= -bounce_amount;
+        }
+    }
 }
 
+// #[cfg(feature = "version_3d")]
 #[macroquad::main("Physics Sim")]
 async fn main() {
     let config = load_config("config.toml");
 
-    let ball_count = config.ball_count;
+    let ball_count = config.ball_count_3d;
     let ball_radius = config.ball_radius;
     let gravity = config.gravity;
     let resistance = config.resistance;
@@ -162,6 +180,7 @@ async fn main() {
     let max_pressure = config.max_pressure;
     let width = config.width;
     let height = config.height;
+    let depth = config.depth;
     let mut sim_steps = config.sim_steps;
     let auto_sim_steps = config.auto_sim_steps;
     let target_fps = config.target_fps;
@@ -187,14 +206,16 @@ async fn main() {
         .enumerate()
         .map(|(id, _)| Ball {
             id,
-            position: vec2(
-                rand::gen_range(ball_radius, width - ball_radius),
-                rand::gen_range(ball_radius, height - ball_radius),
-            ),
-            velocity: vec2(
-                rand::gen_range(-100.0, 100.0),
-                rand::gen_range(-100.0, 100.0),
-            ),
+            position: Vec3 {
+                x: rand::gen_range(ball_radius, width - ball_radius),
+                y: rand::gen_range(ball_radius, height - ball_radius),
+                z: rand::gen_range(ball_radius, depth - ball_radius),
+            },
+            velocity: Vec3 {
+                x: rand::gen_range(-100.0, 100.0),
+                y: rand::gen_range(-100.0, 100.0),
+                z: rand::gen_range(-100.0, 100.0),
+            },
             pressure: 0.0,
             color: colors[id],
             radius: ball_radius,
@@ -210,39 +231,47 @@ async fn main() {
     loop {
         clear_background(BLACK);
 
+        set_camera(&Camera3D {
+            position: vec3(0., 0., -1300.),
+            up: vec3(0., -1., 0.),
+            target: vec3(width / 2.0, height / 2.0, 0.),
+            ..Default::default()
+        });
+
         let mut largest_speed: f32 = 0.0;
         let mut largest_pressure: f32 = 0.0;
 
-        let mouse_position: Vec2 = mouse_position().into();
+        // let mouse_position: Vec2 = mouse_position().into();
 
-        let screen_width = screen_width();
-        let screen_height = screen_height();
+        // let screen_width = screen_width();
+        // let screen_height = screen_height();
 
         spatial_hash.clear();
 
-        if is_mouse_button_down(MouseButton::Right) {
-            let color = Color::new(
-                rand::gen_range(0.0, 1.0),
-                rand::gen_range(0.0, 1.0),
-                rand::gen_range(0.0, 1.0),
-                1.0,
-            );
+        // if is_mouse_button_down(MouseButton::Right) {
+        //     let color = Color::new(
+        //         rand::gen_range(0.0, 1.0),
+        //         rand::gen_range(0.0, 1.0),
+        //         rand::gen_range(0.0, 1.0),
+        //         1.0,
+        //     );
 
-            let new_ball: Ball = Ball {
-                id: balls.len(),
-                position: mouse_position,
-                velocity: vec2(
-                    rand::gen_range(-100.0, 100.0),
-                    rand::gen_range(-100.0, 100.0),
-                ),
-                color,
-                pressure: 0.0,
-                radius: ball_radius,
-            };
+        //     let new_ball: Ball = Ball {
+        //         id: balls.len(),
+        //         position: mouse_position,
+        //         velocity: Vec3(
+        //             rand::gen_range(-100.0, 100.0),
+        //             rand::gen_range(-100.0, 100.0),
+        //             rand::gen_range(-100.0, 100.0),
+        //         ),
+        //         color,
+        //         pressure: 0.0,
+        //         radius: ball_radius,
+        //     };
 
-            balls.push(new_ball);
-            colors.push(color);
-        }
+        //     balls.push(new_ball);
+        //     colors.push(color);
+        // }
 
         for ball in balls.iter() {
             spatial_hash.insert(ball.position, ball.id);
@@ -281,7 +310,7 @@ async fn main() {
                         }
                     }
                 }
-                resolve_boundaries(&mut balls[i], screen_width, screen_height, bounce_amount);
+                resolve_boundaries(&mut balls[i], width, height, depth, bounce_amount);
             }
         }
 
@@ -303,17 +332,17 @@ async fn main() {
         }
 
         for ball in balls.iter_mut() {
-            if mouse_pressed {
-                let mut force = mouse_position - ball.position;
+            // if mouse_pressed {
+            //     let mut force = mouse_position - ball.position;
 
-                let distance = force.length();
-                if distance < 0.1 {
-                    force /= distance;
-                }
+            //     let distance = force.length();
+            //     if distance < 0.1 {
+            //         force /= distance;
+            //     }
 
-                let attraction_strength = gravity;
-                ball.velocity += force * attraction_strength * rate;
-            }
+            //     let attraction_strength = gravity;
+            //     ball.velocity += force * attraction_strength * rate;
+            // }
 
             if do_gravity {
                 ball.velocity.y += gravity;
@@ -336,36 +365,38 @@ async fn main() {
 
             ball.position += ball.velocity * rate;
 
-            draw_circle(ball.position.x, ball.position.y, ball.radius, ball.color)
+            draw_sphere(ball.position, ball.radius, None, ball.color)
         }
 
-        if is_key_down(KeyCode::F) {
-            let mut to_remove: Vec<usize> = Vec::new();
+        // if is_key_down(KeyCode::F) {
+        //     let mut to_remove: Vec<usize> = Vec::new();
 
-            for (index, ball) in balls.iter().enumerate() {
-                let dist = ball.position.distance(mouse_position);
+        //     for (index, ball) in balls.iter().enumerate() {
+        //         let dist = ball.position.distance(mouse_position);
 
-                if dist < delete_dist {
-                    to_remove.push(index);
-                }
-            }
+        //         if dist < delete_dist {
+        //             to_remove.push(index);
+        //         }
+        //     }
 
-            to_remove.sort_unstable_by(|a, b| b.cmp(a));
-            for idx in to_remove {
-                balls.remove(idx);
-                colors.remove(idx);
-            }
+        //     to_remove.sort_unstable_by(|a, b| b.cmp(a));
+        //     for idx in to_remove {
+        //         balls.remove(idx);
+        //         colors.remove(idx);
+        //     }
 
-            for (idx, ball) in balls.iter_mut().enumerate() {
-                ball.id = idx;
-                colors[idx] = ball.color;
-            }
-        }
+        //     for (idx, ball) in balls.iter_mut().enumerate() {
+        //         ball.id = idx;
+        //         colors[idx] = ball.color;
+        //     }
+        // }
 
         let fps = get_fps();
         smoothed_fps.update(fps as f32);
 
         let avg_fps = smoothed_fps.get_average();
+
+        draw_cube_wires(vec3(0., 0., 0.), vec3(width, height, depth), DARKGREEN);
 
         draw_text(&format!("FPS: {:.2}", avg_fps), 10.0, 20.0, 30.0, WHITE);
 
@@ -395,6 +426,8 @@ async fn main() {
         );
 
         draw_text(&format!("BALLS: {}", balls.len()), 10.0, 80.0, 30.0, WHITE);
+
+        set_default_camera();
 
         next_frame().await
     }
