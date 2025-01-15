@@ -99,9 +99,8 @@ fn resolve_collision(ball: &mut Ball, otherball: &mut Ball, bounce_amount: f32, 
     ball.position -= pdiff * overlap / 2.0;
     otherball.position += pdiff * overlap / 2.0;
 
-    let vdiff = otherball.velocity - ball.velocity;
-
-    let dot_product = vdiff.x * pdiff.x + vdiff.y * pdiff.y;
+    let relative_velocity = otherball.velocity - ball.velocity;
+    let dot_product = relative_velocity.dot(pdiff);
 
     if dot_product > 0.0 {
         return;
@@ -109,17 +108,16 @@ fn resolve_collision(ball: &mut Ball, otherball: &mut Ball, bounce_amount: f32, 
 
     let force = dot_product * bounce_amount;
 
-    let area = std::f32::consts::PI * ball.radius * ball.radius;
-    let other_area = std::f32::consts::PI * otherball.radius * otherball.radius;
+    ball.pressure = (ball.pressure + -force / (std::f32::consts::PI * ball.radius * ball.radius))
+        .min(1.0)
+        .max(0.0);
+    otherball.pressure = (otherball.pressure
+        + -force / (std::f32::consts::PI * otherball.radius * otherball.radius))
+        .min(1.0)
+        .max(0.0);
 
-    ball.pressure = -force / area;
-    otherball.pressure = -force / other_area;
-
-    ball.pressure = ball.pressure.min(max_pressure);
-    otherball.pressure = otherball.pressure.min(max_pressure);
-
-    ball.velocity += force * pdiff;
-    otherball.velocity -= force * pdiff;
+    ball.velocity += pdiff * force;
+    otherball.velocity -= pdiff * force;
 }
 
 fn resolve_boundaries(ball: &mut Ball, screen_width: f32, screen_height: f32, bounce_amount: f32) {
