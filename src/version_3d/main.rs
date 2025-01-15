@@ -228,13 +228,56 @@ async fn main() {
 
     let mut display_state = State::new();
 
+    let mut cam_angle: f32 = 90.0;
+    let mut cam_height: f32 = -10.0;
+    let mut cam_pos = vec3(width / 2.0, cam_height, -1000.);
+
     loop {
         clear_background(BLACK);
 
+        if is_key_down(KeyCode::Q) {
+            cam_angle += 0.01;
+        }
+
+        if is_key_down(KeyCode::E) {
+            cam_angle -= 0.01;
+        }
+
+        let forward_dir = vec2(cam_angle.cos(), cam_angle.sin());
+
+        if is_key_down(KeyCode::W) {
+            cam_pos.x += forward_dir.x * 10.0;
+            cam_pos.z += forward_dir.y * 10.0;
+        }
+
+        if is_key_down(KeyCode::S) {
+            cam_pos.x -= forward_dir.x * 10.0;
+            cam_pos.z -= forward_dir.y * 10.0;
+        }
+
+        let right_dir = vec2(-forward_dir.y, forward_dir.x);
+
+        if is_key_down(KeyCode::A) {
+            cam_pos.x += right_dir.x * 10.0;
+            cam_pos.z += right_dir.y * 10.0;
+        }
+
+        if is_key_down(KeyCode::D) {
+            cam_pos.x -= right_dir.x * 10.0;
+            cam_pos.z -= right_dir.y * 10.0;
+        }
+
+        if is_key_down(KeyCode::LeftShift) {
+            cam_pos.y += 10.0;
+        }
+        if is_key_down(KeyCode::LeftControl) {
+            cam_pos.y -= 10.0;
+        }
+
         set_camera(&Camera3D {
-            position: vec3(0., 0., -1300.),
-            up: vec3(0., -1., 0.),
-            target: vec3(width / 2.0, height / 2.0, 0.),
+            position: cam_pos,
+            up: vec3(0.0, -1.0, 0.0),
+            target: cam_pos + vec3(forward_dir.x, 0.0, forward_dir.y),
             ..Default::default()
         });
 
@@ -243,8 +286,8 @@ async fn main() {
 
         // let mouse_position: Vec2 = mouse_position().into();
 
-        // let screen_width = screen_width();
-        // let screen_height = screen_height();
+        let width = screen_width();
+        let height = screen_height();
 
         spatial_hash.clear();
 
@@ -321,18 +364,16 @@ async fn main() {
             rate = 0.01
         }
 
-        let mouse_pressed = is_mouse_button_down(MouseButton::Left);
-
         if is_key_pressed(KeyCode::Space) {
             do_gravity = !do_gravity
         }
 
-        if is_key_pressed(KeyCode::D) {
+        if is_key_pressed(KeyCode::R) {
             display_state.toggle_display_mode();
         }
 
         for ball in balls.iter_mut() {
-            // if mouse_pressed {
+            // if is_mouse_button_down(MouseButton::Left); {
             //     let mut force = mouse_position - ball.position;
 
             //     let distance = force.length();
