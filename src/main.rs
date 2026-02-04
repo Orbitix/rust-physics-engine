@@ -24,6 +24,9 @@ enum DisplayMode {
     Pressure,
 }
 
+const SPATIAL_HASH_PADDING: f32 = 2.0;
+const MIN_DELTA_TIME: f32 = 0.01;
+
 #[derive(Resource)]
 struct DisplayState {
     display_mode: DisplayMode,
@@ -104,7 +107,9 @@ fn main() {
         .insert_resource(display_state)
         .insert_resource(simulation_state)
         .insert_resource(simulation_config)
-        .insert_resource(SpatialHash::new((config.ball_radius * 2.0) + 2.0))
+        .insert_resource(SpatialHash::new(
+            (config.ball_radius * 2.0) + SPATIAL_HASH_PADDING,
+        ))
         .init_resource::<MetricsState>()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
@@ -129,7 +134,8 @@ fn main() {
                 update_sim_steps,
                 update_ui,
                 capture_screenshot,
-            ),
+            )
+                .chain(),
         )
         .run();
 }
@@ -138,7 +144,7 @@ fn get_color_from_vel(ball: Ball, largest_speed: f32) -> Color {
     let vel = ball.velocity;
     let speed = vel.length();
 
-    let normalised_speed = if largest_speed > 0.0 {
+    let normalized_speed = if largest_speed > 0.0 {
         speed / largest_speed
     } else {
         0.0
@@ -146,8 +152,8 @@ fn get_color_from_vel(ball: Ball, largest_speed: f32) -> Color {
 
     Color {
         r: (0.0),
-        g: (normalised_speed),
-        b: (1.0 - normalised_speed),
+        g: (normalized_speed),
+        b: (1.0 - normalized_speed),
         a: (1.0),
     }
 }
@@ -155,16 +161,16 @@ fn get_color_from_vel(ball: Ball, largest_speed: f32) -> Color {
 fn get_color_from_pressure(ball: Ball, largest_pressure: f32) -> Color {
     let pressure = ball.pressure;
 
-    let mut normalised_pressure = 0.0;
+    let mut normalized_pressure = 0.0;
 
     if largest_pressure != 0.0 {
-        normalised_pressure = pressure / largest_pressure;
+        normalized_pressure = pressure / largest_pressure;
     }
 
     Color {
-        r: (normalised_pressure),
+        r: (normalized_pressure),
         g: (0.0),
-        b: (1.0 - normalised_pressure),
+        b: (1.0 - normalized_pressure),
         a: (1.0),
     }
 }
@@ -217,25 +223,28 @@ fn resolve_collision(ball: &mut Ball, otherball: &mut Ball, bounce_amount: f32, 
 }
 
 fn resolve_boundaries(ball: &mut Ball, screen_width: f32, screen_height: f32, bounce_amount: f32) {
-    if ball.position.x - ball.radius < 0.0 {
-        ball.position.x = ball.radius;
+    let half_width = screen_width / 2.0;
+    let half_height = screen_height / 2.0;
+
+    if ball.position.x - ball.radius < -half_width {
+        ball.position.x = -half_width + ball.radius;
         if ball.velocity.x < 0.0 {
             ball.velocity.x *= -bounce_amount;
         }
-    } else if ball.position.x + ball.radius > screen_width {
-        ball.position.x = screen_width - ball.radius;
+    } else if ball.position.x + ball.radius > half_width {
+        ball.position.x = half_width - ball.radius;
         if ball.velocity.x > 0.0 {
             ball.velocity.x *= -bounce_amount;
         }
     }
 
-    if ball.position.y - ball.radius < 0.0 {
-        ball.position.y = ball.radius;
+    if ball.position.y - ball.radius < -half_height {
+        ball.position.y = -half_height + ball.radius;
         if ball.velocity.y < 0.0 {
             ball.velocity.y *= -bounce_amount;
         }
-    } else if ball.position.y + ball.radius > screen_height {
-        ball.position.y = screen_height - ball.radius;
+    } else if ball.position.y + ball.radius > half_height {
+        ball.position.y = half_height - ball.radius;
         if ball.velocity.y > 0.0 {
             ball.velocity.y *= -bounce_amount;
         }
@@ -256,11 +265,13 @@ fn setup(
         .collect();
 
     let circle_mesh = meshes.add(Circle::new(ball_radius));
+    let half_width = config.width / 2.0;
+    let half_height = config.height / 2.0;
 
     for (id, color) in colors.iter().copied().enumerate() {
         let position = Vec2::new(
-            random::<f32>() * (config.width - 2.0 * ball_radius) + ball_radius,
-            random::<f32>() * (config.height - 2.0 * ball_radius) + ball_radius,
+            random::<f32>() * (config.width - 2.0 * ball_radius) - half_width + ball_radius,
+            random::<f32>() * (config.height - 2.0 * ball_radius) - half_height + ball_radius,
         );
         let velocity = Vec2::new(
             random::<f32>() * 200.0 - 100.0,
@@ -284,7 +295,7 @@ fn setup(
     commands.insert_resource(BallColors(colors));
     commands.insert_resource(BallMesh(circle_mesh));
 
-    let window_origin = Vec3::new(-config.width / 2.0, -config.height / 2.0, 0.0);
+    let window_origin = Vec3::new(-half_width, -half_height, 0.0);
     let text_font = TextFont {
         font_size: 24.0,
         ..default()
@@ -371,19 +382,26 @@ fn spawn_ball_on_click(
     let color = Color::srgb(random::<f32>(), random::<f32>(), random::<f32>());
     let ball_radius = config.ball_radius;
     let id = colors.0.len();
+    let world_cursor = Vec2::new(
+        cursor.x - window.width() / 2.0,
+        window.height() / 2.0 - cursor.y,
+    );
 
     commands.spawn((
         Ball {
             id,
-            position: cursor,
-            velocity: Vec2::new(random::<f32>() * 200.0 - 100.0, random::<f32>() * 200.0 - 100.0),
+            position: world_cursor,
+            velocity: Vec2::new(
+                random::<f32>() * 200.0 - 100.0,
+                random::<f32>() * 200.0 - 100.0,
+            ),
             pressure: 0.0,
             color,
             radius: ball_radius,
         },
         Mesh2d(ball_mesh.0.clone()),
         MeshMaterial2d(materials.add(color)),
-        Transform::from_translation(cursor.extend(0.0)),
+        Transform::from_translation(world_cursor.extend(0.0)),
     ));
 
     colors.0.push(color);
@@ -472,16 +490,18 @@ fn apply_motion(
     };
 
     let mouse_pressed = mouse.pressed(MouseButton::Left);
-    let cursor = window.cursor_position();
+    let cursor = window
+        .cursor_position()
+        .map(|cursor| Vec2::new(cursor.x - window.width() / 2.0, window.height() / 2.0 - cursor.y));
 
-    let rate = time.delta_seconds().max(0.01);
+    let rate = time.delta_seconds().max(MIN_DELTA_TIME);
 
     for mut ball in balls.iter_mut() {
         if mouse_pressed {
             if let Some(cursor) = cursor {
                 let mut force = cursor - ball.position;
                 let distance = force.length();
-                if distance > 0.1 {
+                if distance < 0.1 {
                     force /= distance;
                 }
                 ball.velocity += force * simulation_config.gravity * rate;
