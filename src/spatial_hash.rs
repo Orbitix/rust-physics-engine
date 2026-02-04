@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use macroquad::prelude::*;
+use bevy::prelude::Vec2;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct CellCoords(i32, i32);
