@@ -4,7 +4,8 @@ use std::fs;
 
 #[derive(Debug, Deserialize, Resource)]
 pub struct Config {
-    pub ball_count: usize,
+    pub ball_count_2d: usize,
+    pub ball_count_3d: usize,
     pub ball_radius: f32,
     pub gravity: f32,
     pub resistance: f32,
@@ -13,6 +14,7 @@ pub struct Config {
     pub max_pressure: f32,
     pub width: f32,
     pub height: f32,
+    pub depth: f32,
     pub sim_steps: i32,
     pub auto_sim_steps: bool,
     pub target_fps: i32,

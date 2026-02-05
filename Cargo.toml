@@ -1,6 +1,6 @@
 [package]
 name = "rust-physics-engine"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 
 [dependencies]
@@ -9,9 +9,26 @@ rand = "0.8.5"
 serde = { version = "1.0.215", features = ["derive"] }
 toml = "0.8.19"
 
-# [profile.release]
-# lto = "fat"
-# codegen-units = 1
+# Optional dependencies for version_3d (has known vulnerabilities)
+macroquad = { version = "0.4.13", optional = true }
+partial-borrow = { version = "1.0.1", optional = true }
+
+[features]
+default = []
+version_3d = ["macroquad", "partial-borrow"]
+
+[[bin]]
+name = "version_2d"
+path = "src/version_2d/main.rs"
+
+[[bin]]
+name = "version_3d"
+path = "src/version_3d/main.rs"
+required-features = ["version_3d"]
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
 
 # Enable a small amount of optimization in the dev profile.
 [profile.dev]

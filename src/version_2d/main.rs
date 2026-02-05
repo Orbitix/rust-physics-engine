@@ -1,11 +1,11 @@
-mod config;
+use rust_physics_engine::common;
 mod spatial_hash;
 
 use bevy::prelude::*;
 use bevy::window::{PrimaryWindow, WindowResolution};
 use bevy::sprite::Anchor;
 use rand::random;
-use config::{load_config, Config};
+use common::config::{load_config, Config};
 use spatial_hash::SpatialHash as SpatialHashInner;
 
 #[derive(Resource)]
@@ -259,7 +259,7 @@ fn setup(
     commands.spawn(Camera2d);
 
     let ball_radius = config.ball_radius;
-    let colors: Vec<Color> = (0..config.ball_count)
+    let colors: Vec<Color> = (0..config.ball_count_2d)
         .map(|_| Color::srgb(random::<f32>(), random::<f32>(), random::<f32>()))
         .collect();
 
@@ -318,7 +318,7 @@ fn setup(
         .id();
     let balls_entity = commands
         .spawn((
-            Text2d::new(format!("BALLS: {}", config.ball_count)),
+            Text2d::new(format!("BALLS: {}", config.ball_count_2d)),
             text_font,
             Anchor::TopLeft,
             Transform::from_translation(window_origin + Vec3::new(20.0, config.height - 80.0, 1.0)),
