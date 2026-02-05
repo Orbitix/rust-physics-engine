@@ -10,8 +10,6 @@ partial-borrow = "1.0.1"
 rand = "0.8.5"
 serde = { version = "1.0.215", features = ["derive"] }
 toml = "0.8.19"
-# version_2d = { path = "src/version_2d/main.rs" }
-# version_3d = { path = "src/version_3d/main.rs" }
 
 [[bin]]
 name = "version_2d"
@@ -20,10 +18,6 @@ path = "src/version_2d/main.rs"
 [[bin]]
 name = "version_3d"
 path = "src/version_3d/main.rs"
-
-[features]
-version_2d = []
-version_3d = []
 
 [profile.release]
 lto = "fat"
