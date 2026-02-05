@@ -441,6 +441,14 @@ fn delete_balls_on_key(
         }
     }
 
+    if to_remove.is_empty() {
+        return;
+    }
+
+    // Collect entities to remove for filtering
+    let entities_to_remove: std::collections::HashSet<Entity> = 
+        to_remove.iter().map(|(e, _)| *e).collect();
+
     // Sort by id in descending order to remove from colors vec correctly
     to_remove.sort_unstable_by(|a, b| b.1.cmp(&a.1));
 
@@ -451,14 +459,16 @@ fn delete_balls_on_key(
         }
     }
 
-    // Re-index remaining balls
-    let mut balls_vec: Vec<(Entity, Ball)> = balls.iter().map(|(e, b)| (e, *b)).collect();
+    // Re-index remaining balls (filter out despawned entities)
+    let mut balls_vec: Vec<(Entity, Ball)> = balls.iter()
+        .filter(|(e, _)| !entities_to_remove.contains(e))
+        .map(|(e, b)| (e, *b))
+        .collect();
     balls_vec.sort_by_key(|(_, ball)| ball.id);
     
-    for (idx, (entity, mut ball)) in balls_vec.iter_mut().enumerate() {
-        ball.id = idx;
+    for (idx, (entity, ball)) in balls_vec.iter().enumerate() {
         commands.entity(*entity).insert(Ball {
-            id: ball.id,
+            id: idx,
             position: ball.position,
             velocity: ball.velocity,
             pressure: ball.pressure,
