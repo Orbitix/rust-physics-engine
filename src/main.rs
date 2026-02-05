@@ -2,10 +2,14 @@ mod config;
 mod spatial_hash;
 
 use bevy::prelude::*;
-use bevy::window::PrimaryWindow;
+use bevy::window::{PrimaryWindow, WindowResolution};
+use bevy::sprite::Anchor;
 use rand::random;
 use config::{load_config, Config};
-use spatial_hash::SpatialHash;
+use spatial_hash::SpatialHash as SpatialHashInner;
+
+#[derive(Resource)]
+struct SpatialHash<ID>(SpatialHashInner<ID>);
 
 #[derive(Debug, Clone, Copy, Component)]
 struct Ball {
@@ -102,18 +106,22 @@ fn main() {
         max_pressure: config.max_pressure,
     };
 
+    let window_width = config.width;
+    let window_height = config.height;
+    let spatial_hash_cell_size = (config.ball_radius * 2.0) + SPATIAL_HASH_PADDING;
+
     App::new()
         .insert_resource(config)
         .insert_resource(display_state)
         .insert_resource(simulation_state)
         .insert_resource(simulation_config)
-        .insert_resource(SpatialHash::new(
-            (config.ball_radius * 2.0) + SPATIAL_HASH_PADDING,
-        ))
+        .insert_resource(SpatialHash(SpatialHashInner::<Entity>::new(
+            spatial_hash_cell_size,
+        )))
         .init_resource::<MetricsState>()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
-                resolution: WindowResolution::new(config.width, config.height)
+                resolution: WindowResolution::new(window_width, window_height)
                     .with_scale_factor_override(1.0),
                 title: "Physics Sim".to_string(),
                 ..default()
@@ -126,6 +134,7 @@ fn main() {
             (
                 handle_inputs,
                 spawn_ball_on_click,
+                delete_balls_on_key,
                 update_spatial_hash,
                 simulate,
                 apply_motion,
@@ -150,12 +159,7 @@ fn get_color_from_vel(ball: Ball, largest_speed: f32) -> Color {
         0.0
     };
 
-    Color {
-        r: (0.0),
-        g: (normalized_speed),
-        b: (1.0 - normalized_speed),
-        a: (1.0),
-    }
+    Color::srgb(0.0, normalized_speed, 1.0 - normalized_speed)
 }
 
 fn get_color_from_pressure(ball: Ball, largest_pressure: f32) -> Color {
@@ -167,12 +171,7 @@ fn get_color_from_pressure(ball: Ball, largest_pressure: f32) -> Color {
         normalized_pressure = pressure / largest_pressure;
     }
 
-    Color {
-        r: (normalized_pressure),
-        g: (0.0),
-        b: (1.0 - normalized_pressure),
-        a: (1.0),
-    }
+    Color::srgb(normalized_pressure, 0.0, 1.0 - normalized_pressure)
 }
 
 fn is_colliding(ball: &Ball, otherball: &Ball) -> bool {
@@ -260,7 +259,7 @@ fn setup(
     commands.spawn(Camera2d);
 
     let ball_radius = config.ball_radius;
-    let mut colors: Vec<Color> = (0..config.ball_count)
+    let colors: Vec<Color> = (0..config.ball_count)
         .map(|_| Color::srgb(random::<f32>(), random::<f32>(), random::<f32>()))
         .collect();
 
@@ -407,13 +406,88 @@ fn spawn_ball_on_click(
     colors.0.push(color);
 }
 
+fn delete_balls_on_key(
+    mut commands: Commands,
+    mut colors: ResMut<BallColors>,
+    config: Res<Config>,
+    keyboard: Res<ButtonInput<KeyCode>>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    balls: Query<(Entity, &Ball)>,
+) {
+    if !keyboard.pressed(KeyCode::KeyF) {
+        return;
+    }
+
+    let Ok(window) = windows.get_single() else {
+        return;
+    };
+
+    let Some(cursor) = window.cursor_position() else {
+        return;
+    };
+
+    let world_cursor = Vec2::new(
+        cursor.x - window.width() / 2.0,
+        window.height() / 2.0 - cursor.y,
+    );
+
+    let delete_dist = config.delete_dist;
+    let mut to_remove: Vec<(Entity, usize)> = Vec::new();
+
+    for (entity, ball) in balls.iter() {
+        let dist = ball.position.distance(world_cursor);
+        if dist < delete_dist {
+            to_remove.push((entity, ball.id));
+        }
+    }
+
+    if to_remove.is_empty() {
+        return;
+    }
+
+    // Collect entities to remove for filtering
+    let entities_to_remove: std::collections::HashSet<Entity> = 
+        to_remove.iter().map(|(e, _)| *e).collect();
+
+    // Sort by id in descending order to remove from colors vec correctly
+    to_remove.sort_unstable_by(|a, b| b.1.cmp(&a.1));
+
+    for (entity, id) in to_remove {
+        commands.entity(entity).despawn();
+        if id < colors.0.len() {
+            colors.0.remove(id);
+        }
+    }
+
+    // Re-index remaining balls (filter out despawned entities)
+    let mut balls_vec: Vec<(Entity, Ball)> = balls.iter()
+        .filter(|(e, _)| !entities_to_remove.contains(e))
+        .map(|(e, b)| (e, *b))
+        .collect();
+    balls_vec.sort_by_key(|(_, ball)| ball.id);
+    
+    for (idx, (entity, ball)) in balls_vec.iter().enumerate() {
+        commands.entity(*entity).insert(Ball {
+            id: idx,
+            position: ball.position,
+            velocity: ball.velocity,
+            pressure: ball.pressure,
+            color: ball.color,
+            radius: ball.radius,
+        });
+        if idx < colors.0.len() {
+            colors.0[idx] = ball.color;
+        }
+    }
+}
+
 fn update_spatial_hash(
     mut hash: ResMut<SpatialHash<Entity>>,
     balls: Query<(Entity, &Ball)>,
 ) {
-    hash.clear();
+    hash.0.clear();
     for (entity, ball) in balls.iter() {
-        hash.insert(ball.position, entity);
+        hash.0.insert(ball.position, entity);
     }
 }
 
@@ -443,7 +517,7 @@ fn simulate(
         }
 
         for (entity, position) in positions.iter().copied() {
-            for other_entity in hash.get_nearby_objects(position, entity).iter().copied() {
+            for other_entity in hash.0.get_nearby_objects(position, entity).iter().copied() {
                 if entity == other_entity {
                     continue;
                 }
@@ -494,7 +568,7 @@ fn apply_motion(
         .cursor_position()
         .map(|cursor| Vec2::new(cursor.x - window.width() / 2.0, window.height() / 2.0 - cursor.y));
 
-    let rate = time.delta_seconds().max(MIN_DELTA_TIME);
+    let rate = time.delta_secs().max(MIN_DELTA_TIME);
 
     for mut ball in balls.iter_mut() {
         if mouse_pressed {
@@ -516,7 +590,8 @@ fn apply_motion(
         ball.velocity.y *= simulation_config.resistance;
 
         ball.velocity = ball.velocity.clamp_length_max(simulation_config.max_speed);
-        ball.position += ball.velocity * rate;
+        let velocity = ball.velocity;
+        ball.position += velocity * rate;
     }
 }
 
@@ -526,8 +601,8 @@ fn update_visuals(
     display_state: Res<DisplayState>,
     mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
-    let mut largest_speed = 0.0;
-    let mut largest_pressure = 0.0;
+    let mut largest_speed: f32 = 0.0;
+    let mut largest_pressure: f32 = 0.0;
 
     if display_state.display_mode == DisplayMode::Velocity {
         for (ball, _, _) in balls.iter() {
@@ -555,7 +630,7 @@ fn update_visuals(
 }
 
 fn update_fps(time: Res<Time>, mut metrics: ResMut<MetricsState>) {
-    metrics.fps = 1.0 / time.delta_seconds().max(0.0001);
+    metrics.fps = 1.0 / time.delta_secs().max(0.0001);
 }
 
 fn update_sim_steps(
@@ -569,7 +644,7 @@ fn update_sim_steps(
 
     if metrics.fps < config.target_fps as f32 {
         simulation_state.sim_steps -= 1;
-    } else if metrics.fps > (config.target_fps + 20) as f32 {
+    } else if metrics.fps > (config.target_fps + config.fps_boundary) as f32 {
         simulation_state.sim_steps += 1;
     }
 
