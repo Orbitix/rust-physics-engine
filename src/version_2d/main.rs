@@ -2,10 +2,12 @@ use rust_physics_engine::common;
 mod spatial_hash;
 
 use bevy::prelude::*;
-use bevy::window::{PrimaryWindow, WindowResolution};
+use bevy::render::settings::{Backends, RenderCreation, WgpuSettings};
+use bevy::render::RenderPlugin;
 use bevy::sprite::Anchor;
-use rand::random;
+use bevy::window::{PresentMode, PrimaryWindow, WindowResolution};
 use common::config::{load_config, Config};
+use rand::random;
 use spatial_hash::SpatialHash as SpatialHashInner;
 
 #[derive(Resource)]
@@ -17,7 +19,6 @@ struct Ball {
     position: Vec2,
     velocity: Vec2,
     pressure: f32,
-    color: Color,
     radius: f32,
 }
 
@@ -30,6 +31,7 @@ enum DisplayMode {
 
 const SPATIAL_HASH_PADDING: f32 = 2.0;
 const MIN_DELTA_TIME: f32 = 0.01;
+const CONSTRAINT_ITERATIONS: usize = 3;
 
 #[derive(Resource)]
 struct DisplayState {
@@ -92,6 +94,8 @@ struct UiState {
 #[derive(Resource, Default)]
 struct MetricsState {
     fps: f32,
+    fps_ema: f32,
+    warmup_frames: u32,
 }
 
 fn main() {
@@ -119,15 +123,26 @@ fn main() {
             spatial_hash_cell_size,
         )))
         .init_resource::<MetricsState>()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                resolution: WindowResolution::new(window_width, window_height)
-                    .with_scale_factor_override(1.0),
-                title: "Physics Sim".to_string(),
-                ..default()
-            }),
-            ..default()
-        }))
+        .add_plugins(
+            DefaultPlugins
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        resolution: WindowResolution::new(window_width, window_height)
+                            .with_scale_factor_override(1.0),
+                        present_mode: PresentMode::AutoNoVsync,
+                        title: "Physics Sim".to_string(),
+                        ..default()
+                    }),
+                    ..default()
+                })
+                .set(RenderPlugin {
+                    render_creation: RenderCreation::Automatic(WgpuSettings {
+                        backends: Some(Backends::VULKAN | Backends::GL),
+                        ..default()
+                    }),
+                    ..default()
+                }),
+        )
         .add_systems(Startup, setup)
         .add_systems(
             Update,
@@ -282,7 +297,6 @@ fn setup(
                 position,
                 velocity,
                 pressure: 0.0,
-                color,
                 radius: ball_radius,
             },
             Mesh2d(circle_mesh.clone()),
@@ -395,7 +409,6 @@ fn spawn_ball_on_click(
                 random::<f32>() * 200.0 - 100.0,
             ),
             pressure: 0.0,
-            color,
             radius: ball_radius,
         },
         Mesh2d(ball_mesh.0.clone()),
@@ -446,7 +459,7 @@ fn delete_balls_on_key(
     }
 
     // Collect entities to remove for filtering
-    let entities_to_remove: std::collections::HashSet<Entity> = 
+    let entities_to_remove: std::collections::HashSet<Entity> =
         to_remove.iter().map(|(e, _)| *e).collect();
 
     // Sort by id in descending order to remove from colors vec correctly
@@ -460,31 +473,26 @@ fn delete_balls_on_key(
     }
 
     // Re-index remaining balls (filter out despawned entities)
-    let mut balls_vec: Vec<(Entity, Ball)> = balls.iter()
+    let mut balls_vec: Vec<(Entity, Ball)> = balls
+        .iter()
         .filter(|(e, _)| !entities_to_remove.contains(e))
         .map(|(e, b)| (e, *b))
         .collect();
     balls_vec.sort_by_key(|(_, ball)| ball.id);
-    
+
     for (idx, (entity, ball)) in balls_vec.iter().enumerate() {
         commands.entity(*entity).insert(Ball {
             id: idx,
             position: ball.position,
             velocity: ball.velocity,
             pressure: ball.pressure,
-            color: ball.color,
             radius: ball.radius,
         });
-        if idx < colors.0.len() {
-            colors.0[idx] = ball.color;
-        }
+        // Color is now stored in Sprite component
     }
 }
 
-fn update_spatial_hash(
-    mut hash: ResMut<SpatialHash<Entity>>,
-    balls: Query<(Entity, &Ball)>,
-) {
+fn update_spatial_hash(mut hash: ResMut<SpatialHash<Entity>>, balls: Query<(Entity, &Ball)>) {
     hash.0.clear();
     for (entity, ball) in balls.iter() {
         hash.0.insert(ball.position, entity);
@@ -504,6 +512,11 @@ fn simulate(
 
     let screen_width = window.width();
     let screen_height = window.height();
+
+    // Decay pressure for all balls
+    for mut ball in balls.p1().iter_mut() {
+        ball.pressure *= 0.95;
+    }
 
     for _ in 0..simulation_state.sim_steps {
         let positions: Vec<(Entity, Vec2)> = balls
@@ -532,9 +545,6 @@ fn simulate(
                             simulation_config.bounce_amount,
                             simulation_config.max_pressure,
                         );
-                    } else {
-                        ball.pressure = 0.0;
-                        other_ball.pressure = 0.0;
                     }
                 }
             }
@@ -546,6 +556,47 @@ fn simulate(
                     screen_height,
                     simulation_config.bounce_amount,
                 );
+            }
+        }
+
+        // Iterative position correction to prevent interpenetration
+        for _ in 0..CONSTRAINT_ITERATIONS {
+            let positions: Vec<(Entity, Vec2)> = balls
+                .p0()
+                .iter()
+                .map(|(entity, ball)| (entity, ball.position))
+                .collect();
+
+            for (entity, position) in positions.iter().copied() {
+                for other_entity in hash.0.get_nearby_objects(position, entity).iter().copied() {
+                    if entity == other_entity {
+                        continue;
+                    }
+
+                    if let Ok([mut ball, mut other_ball]) =
+                        balls.p1().get_many_mut([entity, other_entity])
+                    {
+                        let dist = ball.position.distance(other_ball.position);
+                        let overlap = (ball.radius + other_ball.radius) - dist;
+
+                        if overlap > 0.0 {
+                            let correction =
+                                (other_ball.position - ball.position) / dist * overlap * 0.5;
+                            ball.position -= correction;
+                            other_ball.position += correction;
+                        }
+                    }
+                }
+
+                // Re-apply boundary constraints after each correction iteration
+                if let Ok(mut ball) = balls.p1().get_mut(entity) {
+                    resolve_boundaries(
+                        &mut ball,
+                        screen_width,
+                        screen_height,
+                        simulation_config.bounce_amount,
+                    );
+                }
             }
         }
     }
@@ -564,9 +615,12 @@ fn apply_motion(
     };
 
     let mouse_pressed = mouse.pressed(MouseButton::Left);
-    let cursor = window
-        .cursor_position()
-        .map(|cursor| Vec2::new(cursor.x - window.width() / 2.0, window.height() / 2.0 - cursor.y));
+    let cursor = window.cursor_position().map(|cursor| {
+        Vec2::new(
+            cursor.x - window.width() / 2.0,
+            window.height() / 2.0 - cursor.y,
+        )
+    });
 
     let rate = time.delta_secs().max(MIN_DELTA_TIME);
 
@@ -583,7 +637,7 @@ fn apply_motion(
         }
 
         if simulation_state.do_gravity {
-            ball.velocity.y += simulation_config.gravity;
+            ball.velocity.y -= simulation_config.gravity;
         }
 
         ball.velocity.x *= simulation_config.resistance;
@@ -601,36 +655,50 @@ fn update_visuals(
     display_state: Res<DisplayState>,
     mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
-    let mut largest_speed: f32 = 0.0;
-    let mut largest_pressure: f32 = 0.0;
-
-    if display_state.display_mode == DisplayMode::Velocity {
-        for (ball, _, _) in balls.iter() {
-            largest_speed = largest_speed.max(ball.velocity.length());
+    // Only update positions always
+    if display_state.display_mode == DisplayMode::Normal {
+        for (ball, _, mut transform) in balls.iter_mut() {
+            transform.translation = ball.position.extend(0.0);
         }
-    }
+    } else {
+        let mut largest_speed: f32 = 0.0;
+        let mut largest_pressure: f32 = 0.0;
 
-    if display_state.display_mode == DisplayMode::Pressure {
-        for (ball, _, _) in balls.iter() {
-            largest_pressure = largest_pressure.max(ball.pressure);
+        if display_state.display_mode == DisplayMode::Velocity {
+            for (ball, _, _) in balls.iter() {
+                largest_speed = largest_speed.max(ball.velocity.length());
+            }
+        } else if display_state.display_mode == DisplayMode::Pressure {
+            for (ball, _, _) in balls.iter() {
+                largest_pressure = largest_pressure.max(ball.pressure);
+            }
         }
-    }
 
-    for (ball, material, mut transform) in balls.iter_mut() {
-        let color = match display_state.display_mode {
-            DisplayMode::Normal => colors.0[ball.id],
-            DisplayMode::Velocity => get_color_from_vel(*ball, largest_speed),
-            DisplayMode::Pressure => get_color_from_pressure(*ball, largest_pressure),
-        };
-        if let Some(material) = materials.get_mut(&material.0) {
-            material.color = color;
+        for (ball, material, mut transform) in balls.iter_mut() {
+            transform.translation = ball.position.extend(0.0);
+            let color = match display_state.display_mode {
+                DisplayMode::Normal => colors.0.get(ball.id).copied().unwrap_or(Color::WHITE),
+                DisplayMode::Velocity => get_color_from_vel(*ball, largest_speed),
+                DisplayMode::Pressure => get_color_from_pressure(*ball, largest_pressure),
+            };
+            if let Some(mat) = materials.get_mut(&material.0) {
+                mat.color = color;
+            }
         }
-        transform.translation = ball.position.extend(0.0);
     }
 }
 
 fn update_fps(time: Res<Time>, mut metrics: ResMut<MetricsState>) {
-    metrics.fps = 1.0 / time.delta_secs().max(0.0001);
+    let fps = 1.0 / time.delta_secs().max(0.0001);
+    metrics.fps = fps;
+    metrics.warmup_frames += 1;
+
+    let alpha = 0.2;
+    if metrics.fps_ema == 0.0 {
+        metrics.fps_ema = fps;
+    } else {
+        metrics.fps_ema = metrics.fps_ema + alpha * (fps - metrics.fps_ema);
+    }
 }
 
 fn update_sim_steps(
@@ -642,10 +710,29 @@ fn update_sim_steps(
         return;
     }
 
-    if metrics.fps < config.target_fps as f32 {
-        simulation_state.sim_steps -= 1;
-    } else if metrics.fps > (config.target_fps + config.fps_boundary) as f32 {
-        simulation_state.sim_steps += 1;
+    // Wait for FPS to stabilize before adjusting
+    if metrics.warmup_frames < 120 {
+        return;
+    }
+
+    // Only adjust every 30 frames to allow changes to settle
+    if metrics.warmup_frames % 30 != 0 {
+        return;
+    }
+
+    let target_fps = config.target_fps as f32;
+    let fps = metrics.fps_ema.max(0.0001);
+    let error = fps - target_fps;
+    let deadband = 3.0;
+
+    if error.abs() > deadband {
+        let mut delta = 0;
+        if error < -5.0 {
+            delta = -1;
+        } else if error > 5.0 {
+            delta = 1;
+        }
+        simulation_state.sim_steps += delta;
     }
 
     simulation_state.sim_steps = simulation_state.sim_steps.clamp(1, 200);
@@ -659,7 +746,7 @@ fn update_ui(
     metrics: Res<MetricsState>,
 ) {
     if let Ok(mut fps_text) = texts.get_mut(ui_state.fps_entity) {
-        **fps_text = format!("FPS: {:.2}", metrics.fps);
+        **fps_text = format!("FPS: {:.0}", metrics.fps);
     }
     if let Ok(mut sim_text) = texts.get_mut(ui_state.sim_steps_entity) {
         **sim_text = format!("SIM STEPS: {}", simulation_state.sim_steps);
@@ -671,6 +758,8 @@ fn update_ui(
 
 fn capture_screenshot(keyboard: Res<ButtonInput<KeyCode>>) {
     if keyboard.just_pressed(KeyCode::KeyP) {
-        info!("Screenshot requested; use external tooling to capture the window in this environment.");
+        info!(
+            "Screenshot requested; use external tooling to capture the window in this environment."
+        );
     }
 }
