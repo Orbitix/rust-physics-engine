@@ -2,4 +2,4 @@
 
 A simple ball physics solver (poorly) written in rust
 
-using macroquad for graphics libary
+using Bevy for the graphics library

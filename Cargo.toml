@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 bevy = "0.15.0"
-partial-borrow = "1.0.1"
+rand = "0.8.5"
 serde = { version = "1.0.215", features = ["derive"] }
 toml = "0.8.19"
 
