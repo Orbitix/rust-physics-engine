@@ -1,15 +1,17 @@
 use rust_physics_engine::common;
 mod spatial_hash;
 
-use common::config::load_config;
-use common::fps_counter::SmoothedFps;
-use spatial_hash::SpatialHash;
+use bevy::prelude::*;
+use bevy::window::{PrimaryWindow, WindowResolution};
+use bevy::sprite::Anchor;
+use rand::random;
+use common::config::{load_config, Config};
+use spatial_hash::SpatialHash as SpatialHashInner;
 
-use partial_borrow::prelude::*;
+#[derive(Resource)]
+struct SpatialHash<ID>(SpatialHashInner<ID>);
 
-use macroquad::prelude::*;
-
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Component)]
 struct Ball {
     id: usize,
     position: Vec2,
@@ -26,13 +28,17 @@ enum DisplayMode {
     Pressure,
 }
 
-struct State {
+const SPATIAL_HASH_PADDING: f32 = 2.0;
+const MIN_DELTA_TIME: f32 = 0.01;
+
+#[derive(Resource)]
+struct DisplayState {
     display_mode: DisplayMode,
 }
 
-impl State {
+impl DisplayState {
     fn new() -> Self {
-        State {
+        DisplayState {
             display_mode: DisplayMode::Normal,
         }
     }
@@ -46,35 +52,126 @@ impl State {
     }
 }
 
+#[derive(Resource)]
+struct SimulationConfig {
+    gravity: f32,
+    resistance: f32,
+    bounce_amount: f32,
+    max_speed: f32,
+    max_pressure: f32,
+}
+
+#[derive(Resource)]
+struct SimulationState {
+    sim_steps: i32,
+    do_gravity: bool,
+}
+
+impl SimulationState {
+    fn new(sim_steps: i32) -> Self {
+        Self {
+            sim_steps,
+            do_gravity: true,
+        }
+    }
+}
+
+#[derive(Resource)]
+struct BallColors(Vec<Color>);
+
+#[derive(Resource)]
+struct BallMesh(Handle<Mesh>);
+
+#[derive(Resource)]
+struct UiState {
+    fps_entity: Entity,
+    sim_steps_entity: Entity,
+    balls_entity: Entity,
+}
+
+#[derive(Resource, Default)]
+struct MetricsState {
+    fps: f32,
+}
+
+fn main() {
+    let config = load_config("config.toml");
+    let display_state = DisplayState::new();
+    let simulation_state = SimulationState::new(config.sim_steps);
+    let simulation_config = SimulationConfig {
+        gravity: config.gravity,
+        resistance: config.resistance,
+        bounce_amount: config.bounce_amount,
+        max_speed: config.max_speed,
+        max_pressure: config.max_pressure,
+    };
+
+    let window_width = config.width;
+    let window_height = config.height;
+    let spatial_hash_cell_size = (config.ball_radius * 2.0) + SPATIAL_HASH_PADDING;
+
+    App::new()
+        .insert_resource(config)
+        .insert_resource(display_state)
+        .insert_resource(simulation_state)
+        .insert_resource(simulation_config)
+        .insert_resource(SpatialHash(SpatialHashInner::<Entity>::new(
+            spatial_hash_cell_size,
+        )))
+        .init_resource::<MetricsState>()
+        .add_plugins(DefaultPlugins.set(WindowPlugin {
+            primary_window: Some(Window {
+                resolution: WindowResolution::new(window_width, window_height)
+                    .with_scale_factor_override(1.0),
+                title: "Physics Sim".to_string(),
+                ..default()
+            }),
+            ..default()
+        }))
+        .add_systems(Startup, setup)
+        .add_systems(
+            Update,
+            (
+                handle_inputs,
+                spawn_ball_on_click,
+                delete_balls_on_key,
+                update_spatial_hash,
+                simulate,
+                apply_motion,
+                update_visuals,
+                update_fps,
+                update_sim_steps,
+                update_ui,
+                capture_screenshot,
+            )
+                .chain(),
+        )
+        .run();
+}
+
 fn get_color_from_vel(ball: Ball, largest_speed: f32) -> Color {
     let vel = ball.velocity;
     let speed = vel.length();
 
-    let normalised_speed = speed / largest_speed;
+    let normalized_speed = if largest_speed > 0.0 {
+        speed / largest_speed
+    } else {
+        0.0
+    };
 
-    Color {
-        r: (0.0),
-        g: (normalised_speed),
-        b: (1.0 - normalised_speed),
-        a: (1.0),
-    }
+    Color::srgb(0.0, normalized_speed, 1.0 - normalized_speed)
 }
 
 fn get_color_from_pressure(ball: Ball, largest_pressure: f32) -> Color {
     let pressure = ball.pressure;
 
-    let mut normalised_pressure = 0.0;
+    let mut normalized_pressure = 0.0;
 
     if largest_pressure != 0.0 {
-        normalised_pressure = pressure / largest_pressure;
+        normalized_pressure = pressure / largest_pressure;
     }
 
-    Color {
-        r: (normalised_pressure),
-        g: (0.0),
-        b: (1.0 - normalised_pressure),
-        a: (1.0),
-    }
+    Color::srgb(normalized_pressure, 0.0, 1.0 - normalized_pressure)
 }
 
 fn is_colliding(ball: &Ball, otherball: &Ball) -> bool {
@@ -99,301 +196,481 @@ fn resolve_collision(ball: &mut Ball, otherball: &mut Ball, bounce_amount: f32, 
     ball.position -= pdiff * overlap / 2.0;
     otherball.position += pdiff * overlap / 2.0;
 
-    let relative_velocity = otherball.velocity - ball.velocity;
-    let dot_product = relative_velocity.dot(pdiff);
+    let vdiff = otherball.velocity - ball.velocity;
+
+    let dot_product = vdiff.x * pdiff.x + vdiff.y * pdiff.y;
 
     if dot_product > 0.0 {
         return;
     }
 
-    let force = dot_product * bounce_amount;
+    let restitution = 1.0 - bounce_amount;
 
-    ball.pressure = (ball.pressure + -force / (std::f32::consts::PI * ball.radius * ball.radius))
-        .min(1.0)
-        .max(0.0);
-    otherball.pressure = (otherball.pressure
-        + -force / (std::f32::consts::PI * otherball.radius * otherball.radius))
-        .min(1.0)
-        .max(0.0);
+    let force = dot_product * restitution;
 
-    ball.velocity += pdiff * force;
-    otherball.velocity -= pdiff * force;
+    let area = std::f32::consts::PI * ball.radius * ball.radius;
+    let other_area = std::f32::consts::PI * otherball.radius * otherball.radius;
+
+    ball.pressure = -force / area;
+    otherball.pressure = -force / other_area;
+
+    ball.pressure = ball.pressure.min(max_pressure);
+    otherball.pressure = otherball.pressure.min(max_pressure);
+
+    ball.velocity += force * pdiff;
+    otherball.velocity -= force * pdiff;
 }
 
 fn resolve_boundaries(ball: &mut Ball, screen_width: f32, screen_height: f32, bounce_amount: f32) {
-    if ball.position.x - ball.radius < 0.0 {
-        ball.position.x = ball.radius;
+    let half_width = screen_width / 2.0;
+    let half_height = screen_height / 2.0;
+
+    if ball.position.x - ball.radius < -half_width {
+        ball.position.x = -half_width + ball.radius;
         if ball.velocity.x < 0.0 {
             ball.velocity.x *= -bounce_amount;
         }
-    } else if ball.position.x + ball.radius > screen_width {
-        ball.position.x = screen_width - ball.radius;
+    } else if ball.position.x + ball.radius > half_width {
+        ball.position.x = half_width - ball.radius;
         if ball.velocity.x > 0.0 {
             ball.velocity.x *= -bounce_amount;
         }
     }
 
-    if ball.position.y - ball.radius < 0.0 {
-        ball.position.y = ball.radius;
+    if ball.position.y - ball.radius < -half_height {
+        ball.position.y = -half_height + ball.radius;
         if ball.velocity.y < 0.0 {
             ball.velocity.y *= -bounce_amount;
         }
-    } else if ball.position.y + ball.radius > screen_height {
-        ball.position.y = screen_height - ball.radius;
+    } else if ball.position.y + ball.radius > half_height {
+        ball.position.y = half_height - ball.radius;
         if ball.velocity.y > 0.0 {
             ball.velocity.y *= -bounce_amount;
         }
     }
 }
 
-#[macroquad::main("Physics Sim")]
-// #[cfg(feature = "version_2d")]
-async fn main() {
-    let config = load_config("config.toml");
+fn setup(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+    config: Res<Config>,
+) {
+    commands.spawn(Camera2d);
 
-    let ball_count = config.ball_count_2d;
     let ball_radius = config.ball_radius;
-    let gravity = config.gravity;
-    let resistance = config.resistance;
-    let bounce_amount = config.bounce_amount;
-    let max_speed = config.max_speed;
-    let max_pressure = config.max_pressure;
-    let width = config.width;
-    let height = config.height;
-    let mut sim_steps = config.sim_steps;
-    let auto_sim_steps = config.auto_sim_steps;
-    let target_fps = config.target_fps;
-    let fps_boundary = config.fps_boundary;
-    let delete_dist = config.delete_dist;
-
-    request_new_screen_size(width, height);
-
-    let mut smoothed_fps = SmoothedFps::new();
-
-    let mut colors: Vec<Color> = (0..ball_count)
-        .map(|_| {
-            Color::new(
-                rand::gen_range(0.0, 1.0),
-                rand::gen_range(0.0, 1.0),
-                rand::gen_range(0.0, 1.0),
-                1.0,
-            )
-        })
+    let colors: Vec<Color> = (0..config.ball_count_2d)
+        .map(|_| Color::srgb(random::<f32>(), random::<f32>(), random::<f32>()))
         .collect();
 
-    let mut balls: Vec<Ball> = (0..ball_count)
-        .enumerate()
-        .map(|(id, _)| Ball {
+    let circle_mesh = meshes.add(Circle::new(ball_radius));
+    let half_width = config.width / 2.0;
+    let half_height = config.height / 2.0;
+
+    for (id, color) in colors.iter().copied().enumerate() {
+        let position = Vec2::new(
+            random::<f32>() * (config.width - 2.0 * ball_radius) - half_width + ball_radius,
+            random::<f32>() * (config.height - 2.0 * ball_radius) - half_height + ball_radius,
+        );
+        let velocity = Vec2::new(
+            random::<f32>() * 200.0 - 100.0,
+            random::<f32>() * 200.0 - 100.0,
+        );
+        commands.spawn((
+            Ball {
+                id,
+                position,
+                velocity,
+                pressure: 0.0,
+                color,
+                radius: ball_radius,
+            },
+            Mesh2d(circle_mesh.clone()),
+            MeshMaterial2d(materials.add(color)),
+            Transform::from_translation(position.extend(0.0)),
+        ));
+    }
+
+    commands.insert_resource(BallColors(colors));
+    commands.insert_resource(BallMesh(circle_mesh));
+
+    let window_origin = Vec3::new(-half_width, -half_height, 0.0);
+    let text_font = TextFont {
+        font_size: 24.0,
+        ..default()
+    };
+
+    let fps_entity = commands
+        .spawn((
+            Text2d::new("FPS: 0.00"),
+            text_font.clone(),
+            Anchor::TopLeft,
+            Transform::from_translation(window_origin + Vec3::new(20.0, config.height - 20.0, 1.0)),
+        ))
+        .id();
+    let sim_steps_entity = commands
+        .spawn((
+            Text2d::new(format!("SIM STEPS: {}", config.sim_steps)),
+            text_font.clone(),
+            Anchor::TopLeft,
+            Transform::from_translation(window_origin + Vec3::new(20.0, config.height - 50.0, 1.0)),
+        ))
+        .id();
+    let balls_entity = commands
+        .spawn((
+            Text2d::new(format!("BALLS: {}", config.ball_count_2d)),
+            text_font,
+            Anchor::TopLeft,
+            Transform::from_translation(window_origin + Vec3::new(20.0, config.height - 80.0, 1.0)),
+        ))
+        .id();
+
+    commands.insert_resource(UiState {
+        fps_entity,
+        sim_steps_entity,
+        balls_entity,
+    });
+}
+
+fn handle_inputs(
+    mut display_state: ResMut<DisplayState>,
+    mut simulation_state: ResMut<SimulationState>,
+    config: Res<Config>,
+    keyboard: Res<ButtonInput<KeyCode>>,
+) {
+    if keyboard.just_pressed(KeyCode::Space) {
+        simulation_state.do_gravity = !simulation_state.do_gravity;
+    }
+    if keyboard.just_pressed(KeyCode::KeyD) {
+        display_state.toggle_display_mode();
+    }
+
+    if config.auto_sim_steps {
+        return;
+    }
+
+    if keyboard.just_pressed(KeyCode::ArrowUp) {
+        simulation_state.sim_steps += 1;
+    } else if keyboard.just_pressed(KeyCode::ArrowDown) {
+        simulation_state.sim_steps -= 1;
+    }
+    simulation_state.sim_steps = simulation_state.sim_steps.clamp(1, 200);
+}
+
+fn spawn_ball_on_click(
+    mut commands: Commands,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+    mut colors: ResMut<BallColors>,
+    ball_mesh: Res<BallMesh>,
+    config: Res<Config>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+) {
+    if !mouse.pressed(MouseButton::Right) {
+        return;
+    }
+
+    let Ok(window) = windows.get_single() else {
+        return;
+    };
+
+    let Some(cursor) = window.cursor_position() else {
+        return;
+    };
+
+    let color = Color::srgb(random::<f32>(), random::<f32>(), random::<f32>());
+    let ball_radius = config.ball_radius;
+    let id = colors.0.len();
+    let world_cursor = Vec2::new(
+        cursor.x - window.width() / 2.0,
+        window.height() / 2.0 - cursor.y,
+    );
+
+    commands.spawn((
+        Ball {
             id,
-            position: vec2(
-                rand::gen_range(ball_radius, width - ball_radius),
-                rand::gen_range(ball_radius, height - ball_radius),
-            ),
-            velocity: vec2(
-                rand::gen_range(-100.0, 100.0),
-                rand::gen_range(-100.0, 100.0),
+            position: world_cursor,
+            velocity: Vec2::new(
+                random::<f32>() * 200.0 - 100.0,
+                random::<f32>() * 200.0 - 100.0,
             ),
             pressure: 0.0,
-            color: colors[id],
+            color,
             radius: ball_radius,
-        })
+        },
+        Mesh2d(ball_mesh.0.clone()),
+        MeshMaterial2d(materials.add(color)),
+        Transform::from_translation(world_cursor.extend(0.0)),
+    ));
+
+    colors.0.push(color);
+}
+
+fn delete_balls_on_key(
+    mut commands: Commands,
+    mut colors: ResMut<BallColors>,
+    config: Res<Config>,
+    keyboard: Res<ButtonInput<KeyCode>>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    balls: Query<(Entity, &Ball)>,
+) {
+    if !keyboard.pressed(KeyCode::KeyF) {
+        return;
+    }
+
+    let Ok(window) = windows.get_single() else {
+        return;
+    };
+
+    let Some(cursor) = window.cursor_position() else {
+        return;
+    };
+
+    let world_cursor = Vec2::new(
+        cursor.x - window.width() / 2.0,
+        window.height() / 2.0 - cursor.y,
+    );
+
+    let delete_dist = config.delete_dist;
+    let mut to_remove: Vec<(Entity, usize)> = Vec::new();
+
+    for (entity, ball) in balls.iter() {
+        let dist = ball.position.distance(world_cursor);
+        if dist < delete_dist {
+            to_remove.push((entity, ball.id));
+        }
+    }
+
+    if to_remove.is_empty() {
+        return;
+    }
+
+    // Collect entities to remove for filtering
+    let entities_to_remove: std::collections::HashSet<Entity> = 
+        to_remove.iter().map(|(e, _)| *e).collect();
+
+    // Sort by id in descending order to remove from colors vec correctly
+    to_remove.sort_unstable_by(|a, b| b.1.cmp(&a.1));
+
+    for (entity, id) in to_remove {
+        commands.entity(entity).despawn();
+        if id < colors.0.len() {
+            colors.0.remove(id);
+        }
+    }
+
+    // Re-index remaining balls (filter out despawned entities)
+    let mut balls_vec: Vec<(Entity, Ball)> = balls.iter()
+        .filter(|(e, _)| !entities_to_remove.contains(e))
+        .map(|(e, b)| (e, *b))
         .collect();
+    balls_vec.sort_by_key(|(_, ball)| ball.id);
+    
+    for (idx, (entity, ball)) in balls_vec.iter().enumerate() {
+        commands.entity(*entity).insert(Ball {
+            id: idx,
+            position: ball.position,
+            velocity: ball.velocity,
+            pressure: ball.pressure,
+            color: ball.color,
+            radius: ball.radius,
+        });
+        if idx < colors.0.len() {
+            colors.0[idx] = ball.color;
+        }
+    }
+}
 
-    let mut spatial_hash: SpatialHash<usize> = SpatialHash::new((ball_radius * 2.0) + 2.0);
+fn update_spatial_hash(
+    mut hash: ResMut<SpatialHash<Entity>>,
+    balls: Query<(Entity, &Ball)>,
+) {
+    hash.0.clear();
+    for (entity, ball) in balls.iter() {
+        hash.0.insert(ball.position, entity);
+    }
+}
 
-    let mut do_gravity = true;
+fn simulate(
+    mut balls: ParamSet<(Query<(Entity, &Ball)>, Query<&mut Ball>)>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    simulation_state: Res<SimulationState>,
+    simulation_config: Res<SimulationConfig>,
+    hash: Res<SpatialHash<Entity>>,
+) {
+    let Ok(window) = windows.get_single() else {
+        return;
+    };
 
-    let mut display_state = State::new();
+    let screen_width = window.width();
+    let screen_height = window.height();
 
-    loop {
-        clear_background(BLACK);
+    for _ in 0..simulation_state.sim_steps {
+        let positions: Vec<(Entity, Vec2)> = balls
+            .p0()
+            .iter()
+            .map(|(entity, ball)| (entity, ball.position))
+            .collect();
 
-        let mut largest_speed: f32 = 0.0;
-        let mut largest_pressure: f32 = 0.0;
-
-        let mouse_position: Vec2 = mouse_position().into();
-
-        let screen_width = screen_width();
-        let screen_height = screen_height();
-
-        spatial_hash.clear();
-
-        if is_mouse_button_down(MouseButton::Right) {
-            let color = Color::new(
-                rand::gen_range(0.0, 1.0),
-                rand::gen_range(0.0, 1.0),
-                rand::gen_range(0.0, 1.0),
-                1.0,
-            );
-
-            let new_ball: Ball = Ball {
-                id: balls.len(),
-                position: mouse_position,
-                velocity: vec2(
-                    rand::gen_range(-100.0, 100.0),
-                    rand::gen_range(-100.0, 100.0),
-                ),
-                color,
-                pressure: 0.0,
-                radius: ball_radius,
-            };
-
-            balls.push(new_ball);
-            colors.push(color);
+        if positions.is_empty() {
+            continue;
         }
 
-        for ball in balls.iter() {
-            spatial_hash.insert(ball.position, ball.id);
-
-            if display_state.display_mode == DisplayMode::Velocity {
-                if ball.velocity.length() > largest_speed {
-                    largest_speed = ball.velocity.length();
+        for (entity, position) in positions.iter().copied() {
+            for other_entity in hash.0.get_nearby_objects(position, entity).iter().copied() {
+                if entity == other_entity {
+                    continue;
                 }
-            }
 
-            if display_state.display_mode == DisplayMode::Pressure {
-                if ball.pressure > largest_pressure {
-                    largest_pressure = ball.pressure;
-                }
-            }
-        }
-
-        for _ in 0..sim_steps {
-            for i in 0..balls.len() {
-                for &other_ball_id in spatial_hash.get_nearby_objects(balls[i].position, i).iter() {
-                    if i != other_ball_id {
-                        // Use index to get mutable references
-                        let (ball, other_ball) = if i < other_ball_id {
-                            let (left, right) = balls.split_at_mut(other_ball_id);
-                            (&mut left[i], &mut right[0])
-                        } else {
-                            let (left, right) = balls.split_at_mut(i);
-                            (&mut right[0], &mut left[other_ball_id])
-                        };
-
-                        if is_colliding(ball, other_ball) {
-                            resolve_collision(ball, other_ball, bounce_amount, max_pressure);
-                        } else {
-                            ball.pressure = 0.0;
-                            other_ball.pressure = 0.0;
-                        }
+                if let Ok([mut ball, mut other_ball]) =
+                    balls.p1().get_many_mut([entity, other_entity])
+                {
+                    if is_colliding(&ball, &other_ball) {
+                        resolve_collision(
+                            &mut ball,
+                            &mut other_ball,
+                            simulation_config.bounce_amount,
+                            simulation_config.max_pressure,
+                        );
+                    } else {
+                        ball.pressure = 0.0;
+                        other_ball.pressure = 0.0;
                     }
                 }
-                resolve_boundaries(&mut balls[i], screen_width, screen_height, bounce_amount);
+            }
+
+            if let Ok(mut ball) = balls.p1().get_mut(entity) {
+                resolve_boundaries(
+                    &mut ball,
+                    screen_width,
+                    screen_height,
+                    simulation_config.bounce_amount,
+                );
             }
         }
+    }
+}
 
-        let delta_time = get_frame_time();
-        let mut rate = delta_time;
+fn apply_motion(
+    mut balls: Query<&mut Ball>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    time: Res<Time>,
+    simulation_config: Res<SimulationConfig>,
+    simulation_state: Res<SimulationState>,
+) {
+    let Ok(window) = windows.get_single() else {
+        return;
+    };
 
-        if rate < 0.0 {
-            rate = 0.01
-        }
+    let mouse_pressed = mouse.pressed(MouseButton::Left);
+    let cursor = window
+        .cursor_position()
+        .map(|cursor| Vec2::new(cursor.x - window.width() / 2.0, window.height() / 2.0 - cursor.y));
 
-        let mouse_pressed = is_mouse_button_down(MouseButton::Left);
+    let rate = time.delta_secs().max(MIN_DELTA_TIME);
 
-        if is_key_pressed(KeyCode::Space) {
-            do_gravity = !do_gravity
-        }
-
-        if is_key_pressed(KeyCode::D) {
-            display_state.toggle_display_mode();
-        }
-
-        for ball in balls.iter_mut() {
-            if mouse_pressed {
-                let mut force = mouse_position - ball.position;
-
+    for mut ball in balls.iter_mut() {
+        if mouse_pressed {
+            if let Some(cursor) = cursor {
+                let mut force = cursor - ball.position;
                 let distance = force.length();
                 if distance < 0.1 {
                     force /= distance;
                 }
-
-                let attraction_strength = gravity;
-                ball.velocity += force * attraction_strength * rate;
-            }
-
-            if do_gravity {
-                ball.velocity.y += gravity;
-            }
-
-            match display_state.display_mode {
-                DisplayMode::Normal => ball.color = colors[ball.id],
-                DisplayMode::Velocity => {
-                    ball.color = get_color_from_vel(*ball, largest_speed);
-                }
-                DisplayMode::Pressure => {
-                    ball.color = get_color_from_pressure(*ball, largest_pressure);
-                }
-            }
-
-            ball.velocity.x *= resistance;
-            ball.velocity.y *= resistance;
-
-            ball.velocity = ball.velocity.clamp_length_max(max_speed);
-
-            ball.position += ball.velocity * rate;
-
-            draw_circle(ball.position.x, ball.position.y, ball.radius, ball.color)
-        }
-
-        if is_key_down(KeyCode::F) {
-            let mut to_remove: Vec<usize> = Vec::new();
-
-            for (index, ball) in balls.iter().enumerate() {
-                let dist = ball.position.distance(mouse_position);
-
-                if dist < delete_dist {
-                    to_remove.push(index);
-                }
-            }
-
-            to_remove.sort_unstable_by(|a, b| b.cmp(a));
-            for idx in to_remove {
-                balls.remove(idx);
-                colors.remove(idx);
-            }
-
-            for (idx, ball) in balls.iter_mut().enumerate() {
-                ball.id = idx;
-                colors[idx] = ball.color;
+                ball.velocity += force * simulation_config.gravity * rate;
             }
         }
 
-        let fps = get_fps();
-        smoothed_fps.update(fps as f32);
-
-        let avg_fps = smoothed_fps.get_average();
-
-        draw_text(&format!("FPS: {:.2}", avg_fps), 10.0, 20.0, 30.0, WHITE);
-
-        if auto_sim_steps {
-            if fps < target_fps {
-                sim_steps -= 1;
-            } else if fps > (target_fps + fps_boundary) {
-                sim_steps += 1;
-            }
-        } else {
-            if is_key_pressed(KeyCode::Up) {
-                sim_steps += 1;
-            } else if is_key_pressed(KeyCode::Down) {
-                sim_steps -= 1;
-            }
+        if simulation_state.do_gravity {
+            ball.velocity.y += simulation_config.gravity;
         }
 
-        sim_steps = sim_steps.clamp(1, 200);
-        // sim_steps = (sim_steps as f32 + 0.1 * (target_sim_steps as f32 - sim_steps as f32)) as i32;
+        ball.velocity.x *= simulation_config.resistance;
+        ball.velocity.y *= simulation_config.resistance;
 
-        draw_text(
-            &format!("SIM STEPS: {}", sim_steps),
-            10.0,
-            50.0,
-            30.0,
-            WHITE,
-        );
+        ball.velocity = ball.velocity.clamp_length_max(simulation_config.max_speed);
+        let velocity = ball.velocity;
+        ball.position += velocity * rate;
+    }
+}
 
-        draw_text(&format!("BALLS: {}", balls.len()), 10.0, 80.0, 30.0, WHITE);
+fn update_visuals(
+    mut balls: Query<(&Ball, &MeshMaterial2d<ColorMaterial>, &mut Transform)>,
+    colors: Res<BallColors>,
+    display_state: Res<DisplayState>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+) {
+    let mut largest_speed: f32 = 0.0;
+    let mut largest_pressure: f32 = 0.0;
 
-        next_frame().await
+    if display_state.display_mode == DisplayMode::Velocity {
+        for (ball, _, _) in balls.iter() {
+            largest_speed = largest_speed.max(ball.velocity.length());
+        }
+    }
+
+    if display_state.display_mode == DisplayMode::Pressure {
+        for (ball, _, _) in balls.iter() {
+            largest_pressure = largest_pressure.max(ball.pressure);
+        }
+    }
+
+    for (ball, material, mut transform) in balls.iter_mut() {
+        let color = match display_state.display_mode {
+            DisplayMode::Normal => colors.0[ball.id],
+            DisplayMode::Velocity => get_color_from_vel(*ball, largest_speed),
+            DisplayMode::Pressure => get_color_from_pressure(*ball, largest_pressure),
+        };
+        if let Some(material) = materials.get_mut(&material.0) {
+            material.color = color;
+        }
+        transform.translation = ball.position.extend(0.0);
+    }
+}
+
+fn update_fps(time: Res<Time>, mut metrics: ResMut<MetricsState>) {
+    metrics.fps = 1.0 / time.delta_secs().max(0.0001);
+}
+
+fn update_sim_steps(
+    mut simulation_state: ResMut<SimulationState>,
+    config: Res<Config>,
+    metrics: Res<MetricsState>,
+) {
+    if !config.auto_sim_steps {
+        return;
+    }
+
+    if metrics.fps < config.target_fps as f32 {
+        simulation_state.sim_steps -= 1;
+    } else if metrics.fps > (config.target_fps + config.fps_boundary) as f32 {
+        simulation_state.sim_steps += 1;
+    }
+
+    simulation_state.sim_steps = simulation_state.sim_steps.clamp(1, 200);
+}
+
+fn update_ui(
+    ui_state: Res<UiState>,
+    mut texts: Query<&mut Text2d>,
+    balls: Query<&Ball>,
+    simulation_state: Res<SimulationState>,
+    metrics: Res<MetricsState>,
+) {
+    if let Ok(mut fps_text) = texts.get_mut(ui_state.fps_entity) {
+        **fps_text = format!("FPS: {:.2}", metrics.fps);
+    }
+    if let Ok(mut sim_text) = texts.get_mut(ui_state.sim_steps_entity) {
+        **sim_text = format!("SIM STEPS: {}", simulation_state.sim_steps);
+    }
+    if let Ok(mut balls_text) = texts.get_mut(ui_state.balls_entity) {
+        **balls_text = format!("BALLS: {}", balls.iter().count());
+    }
+}
+
+fn capture_screenshot(keyboard: Res<ButtonInput<KeyCode>>) {
+    if keyboard.just_pressed(KeyCode::KeyP) {
+        info!("Screenshot requested; use external tooling to capture the window in this environment.");
     }
 }

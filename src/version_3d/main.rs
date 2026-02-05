@@ -166,7 +166,6 @@ fn resolve_boundaries(
     }
 }
 
-// #[cfg(feature = "version_3d")]
 #[macroquad::main("Physics Sim")]
 async fn main() {
     let config = load_config("config.toml");
@@ -373,18 +372,6 @@ async fn main() {
         }
 
         for ball in balls.iter_mut() {
-            // if is_mouse_button_down(MouseButton::Left); {
-            //     let mut force = mouse_position - ball.position;
-
-            //     let distance = force.length();
-            //     if distance < 0.1 {
-            //         force /= distance;
-            //     }
-
-            //     let attraction_strength = gravity;
-            //     ball.velocity += force * attraction_strength * rate;
-            // }
-
             if do_gravity {
                 ball.velocity.y += gravity;
             }
